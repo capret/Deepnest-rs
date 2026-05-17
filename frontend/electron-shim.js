@@ -187,24 +187,25 @@
       return ipcRenderer;
     },
     send: function (channel, payload) {
-      // The nesting computation is no longer a hidden worker window — it runs
-      // natively in the `run_nest` Rust command. Intercept the renderer's
-      // `background-start` and turn it into an invoke; deliver the result back
-      // as `background-response` (and let Rust emit `background-progress`).
+      // The nesting computation runs natively in the `run_nest` Rust command.
+      // `run_nest` returns immediately and does the work on a worker thread,
+      // emitting `background-progress` and `background-response` itself — so
+      // the UI thread never blocks waiting for a nest to finish.
       if (channel === "background-start") {
-        invoke("run_nest", { input: payload }).then(
-          function (result) {
-            if (tauriEvent.emit) tauriEvent.emit("background-response", result);
-          },
-          function (err) {
+        // deepnest.js dispatches several of these in a tight loop; deferring
+        // each invoke to its own task spreads the (synchronous) payload
+        // serialisation across event-loop turns so window drag stays smooth.
+        setTimeout(function () {
+          invoke("run_nest", { input: payload }).catch(function (err) {
             console.error("[shim] run_nest failed:", err);
-          }
-        );
+          });
+        }, 0);
         return;
       }
       if (channel === "background-stop") {
-        // Electron destroyed/recreated the worker window here; the native
-        // run finishes on its own and the next start runs fresh.
+        // Cancel in-flight nests so their worker threads stop computing and
+        // their now-stale results are not delivered/rendered.
+        invoke("stop_nest").catch(function () {});
         return;
       }
       if (tauriEvent.emit) tauriEvent.emit(channel, payload);

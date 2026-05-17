@@ -6,6 +6,7 @@
 //! hidden Electron window; here it runs natively in one `run_nest` command.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use serde::Serialize;
 
@@ -18,11 +19,45 @@ use crate::nfp::nfp;
 use crate::Config;
 
 /// Persistent No-Fit-Polygon cache (Deepnest's `window.nfpcache` / `db`).
+///
 /// Shared across `run_nest` calls so repeated part pairs are computed once.
+/// Each map carries its own lock, held only for the brief get/insert — the
+/// heavy NFP computation happens lock-free — so several nests can run on
+/// different threads in parallel and still share results. `&NfpCache` is
+/// therefore all the algorithm needs (no `&mut`), and it is `Sync`.
 #[derive(Default)]
 pub struct NfpCache {
-    outer: HashMap<String, Poly>,
-    inner: HashMap<String, Vec<Poly>>,
+    outer: Mutex<HashMap<String, Poly>>,
+    inner: Mutex<HashMap<String, Vec<Poly>>>,
+}
+
+impl NfpCache {
+    fn get_outer(&self, key: &str) -> Option<Poly> {
+        self.outer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .cloned()
+    }
+    fn put_outer(&self, key: String, val: Poly) {
+        self.outer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, val);
+    }
+    fn get_inner(&self, key: &str) -> Option<Vec<Poly>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .cloned()
+    }
+    fn put_inner(&self, key: String, val: Vec<Poly>) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, val);
+    }
 }
 
 fn cache_key(a_src: i64, b_src: i64, a_rot: f64, b_rot: f64) -> String {
@@ -84,17 +119,17 @@ fn largest(polys: Vec<Poly>) -> Option<Poly> {
 }
 
 /// `background.js` `getOuterNfp`: NFP of `b` around `a`, cached.
-fn get_outer_nfp(cache: &mut NfpCache, a: &Poly, b: &Poly, inside: bool) -> Option<Poly> {
+fn get_outer_nfp(cache: &NfpCache, a: &Poly, b: &Poly, inside: bool) -> Option<Poly> {
     let key = cache_key(a.source, b.source, a.rotation, b.rotation);
-    if let Some(doc) = cache.outer.get(&key) {
-        return Some(doc.clone());
+    if let Some(doc) = cache.get_outer(&key) {
+        return Some(doc);
     }
     let result = largest(nfp(a, b))?;
     if result.points.len() < 3 {
         return None;
     }
     if !inside && a.source >= 0 && b.source >= 0 {
-        cache.outer.insert(key, result.clone());
+        cache.put_outer(key, result.clone());
     }
     Some(result)
 }
@@ -123,12 +158,12 @@ fn get_frame(a: &Poly) -> Option<Poly> {
 }
 
 /// `background.js` `getInnerNfp`: the region(s) in which `b` fits inside `a`.
-fn get_inner_nfp(cache: &mut NfpCache, a: &Poly, b: &Poly, _config: &Config) -> Option<Vec<Poly>> {
+fn get_inner_nfp(cache: &NfpCache, a: &Poly, b: &Poly, _config: &Config) -> Option<Vec<Poly>> {
     let cached = a.source >= 0 && b.source >= 0;
     let key = cache_key(a.source, b.source, 0.0, b.rotation);
     if cached {
-        if let Some(doc) = cache.inner.get(&key) {
-            return Some(doc.clone());
+        if let Some(doc) = cache.get_inner(&key) {
+            return Some(doc);
         }
     }
 
@@ -159,7 +194,7 @@ fn get_inner_nfp(cache: &mut NfpCache, a: &Poly, b: &Poly, _config: &Config) -> 
     };
 
     if cached {
-        cache.inner.insert(key, result.clone());
+        cache.put_inner(key, result.clone());
     }
     Some(result)
 }
@@ -285,8 +320,9 @@ pub fn place_parts(
     sheets_in: Vec<Poly>,
     parts_in: Vec<Poly>,
     config: &Config,
-    cache: &mut NfpCache,
+    cache: &NfpCache,
     mut progress: impl FnMut(f64),
+    cancelled: impl Fn() -> bool,
 ) -> NestResult {
     // rotate every part by its assigned rotation
     let mut parts: Vec<Poly> = parts_in
@@ -319,7 +355,7 @@ pub fn place_parts(
     let rot_iters = (360.0 / config.rotations.max(1.0)).max(1.0) as i64;
 
     while !parts.is_empty() {
-        if sheets.is_empty() {
+        if sheets.is_empty() || cancelled() {
             break;
         }
         let mut placed: Vec<Poly> = Vec::new();
@@ -334,6 +370,9 @@ pub fn place_parts(
         let mut clip_cache: HashMap<String, (Vec<Poly>, usize)> = HashMap::new();
 
         for i in 0..parts.len() {
+            if cancelled() {
+                break;
+            }
             let mut part = parts[i].clone();
 
             // inner NFP: try rotations until the part fits on the sheet

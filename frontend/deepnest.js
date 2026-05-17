@@ -1127,9 +1127,9 @@
 			
 			
 			for(i=0; i<GA.population.length; i++){
-				//if(running < config.threads && !GA.population[i].processing && !GA.population[i].fitness){
-				// only one background window now...
-				if(running < 1 && !GA.population[i].processing && !GA.population[i].fitness){
+				// opennest-rs: each nest now runs on its own Rust worker thread
+				// (run_nest), so the original multi-worker throttle is restored.
+				if(running < (config.threads || 1) && !GA.population[i].processing && !GA.population[i].fitness){
 					GA.population[i].processing = true;
 										
 					// hash values on arrays don't make it across ipc, store them in an array and reassemble on the other side....

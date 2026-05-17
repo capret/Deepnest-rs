@@ -26,7 +26,8 @@
       "Bash(sed -n '188,215p' main/svgparser.js)",
       "Bash(sed -n '825,865p' main/deepnest.js)",
       "Bash(node --check frontend/svgparser.js)",
-      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('src-tauri/tauri.conf.json','utf8'\\)\\)\")"
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('src-tauri/tauri.conf.json','utf8'\\)\\)\")",
+      "Bash(node --check frontend/deepnest.js)"
     ]
   }
 }

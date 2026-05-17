@@ -105,8 +105,15 @@ fn holes(children: &[Option<Vec<Vec<Pt>>>], i: usize) -> Vec<Poly> {
 ///
 /// `cache` is the persistent NFP cache (share it across calls so repeated
 /// part pairs are computed once). `progress` is called with values in `0..=1`
-/// during placement and finally `-1.0` when finished.
-pub fn run(input: NestInput, cache: &mut NfpCache, progress: impl FnMut(f64)) -> NestResult {
+/// during placement and finally `-1.0` when finished. `cancelled` is polled
+/// between parts; returning `true` aborts the placement early (used to stop
+/// in-flight nests when the user presses Stop).
+pub fn run(
+    input: NestInput,
+    cache: &NfpCache,
+    progress: impl FnMut(f64),
+    cancelled: impl Fn() -> bool,
+) -> NestResult {
     let config = input.config.clone();
     let index = input.index as i64;
 
@@ -133,7 +140,7 @@ pub fn run(input: NestInput, cache: &mut NfpCache, progress: impl FnMut(f64)) ->
         sheets.push(poly);
     }
 
-    let mut result = place_parts(sheets, parts, &config, cache, progress);
+    let mut result = place_parts(sheets, parts, &config, cache, progress, cancelled);
     result.index = index;
     result
 }
@@ -219,8 +226,8 @@ mod tests {
         sheet.id = 100;
         sheet.source = 100;
 
-        let mut cache = NfpCache::default();
-        let result = place_parts(vec![sheet], parts, &config, &mut cache, |_| {});
+        let cache = NfpCache::default();
+        let result = place_parts(vec![sheet], parts, &config, &cache, |_| {}, || false);
         let placed: usize = result
             .placements
             .iter()
@@ -254,8 +261,8 @@ mod tests {
         }"#;
         let input: NestInput =
             serde_json::from_str(json).expect("payload with nulls should deserialize");
-        let mut cache = NfpCache::default();
-        let result = run(input, &mut cache, |_| {});
+        let cache = NfpCache::default();
+        let result = run(input, &cache, |_| {}, || false);
         assert_eq!(result.index, 3);
         let placed: usize = result
             .placements

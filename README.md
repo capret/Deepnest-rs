@@ -36,9 +36,14 @@ so the **whole computation was ported to a native Rust crate**:
 
 It is plain native Rust (no webview/wasm toolchain), so the algorithm is
 **unit-tested directly** — `cargo test` covers NFP, boolean ops, and a full
-placement. The renderer calls it through a single async `run_nest` command
-instead of Electron's per-NFP IPC, and Rust emits `background-progress`
-events during the run.
+placement.
+
+The renderer calls it through the `run_nest` command, which returns
+immediately and runs the placement on a **worker thread** — the UI thread
+never blocks. Progress and the finished layout come back as
+`background-progress` / `background-response` events. The NFP cache is
+thread-safe, so the genetic algorithm's individuals are evaluated **in
+parallel** (up to `config.threads` at once).
 
 ### The compatibility shim (`frontend/electron-shim.js`)
 
