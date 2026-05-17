@@ -1,0 +1,20 @@
+[package]
+name = "nfp"
+version = "0.1.0"
+edition = "2021"
+description = "No-Fit-Polygon (Minkowski-sum) geometry engine for opennest-rs. Rust port of Deepnest's Boost.Polygon C++ addon (minkowski.cc), compiled to WebAssembly."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "=0.2.100"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+geo = "0.30"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rustc --version)",
+      "Bash(echo \"rustc: $\\(rustc --version || echo MISSING\\)\")",
+      "Bash(cargo --version)",
+      "Bash(echo \"cargo: $\\(cargo --version || echo MISSING\\)\")",
+      "Bash(bun --version)",
+      "Bash(cargo build *)",
+      "Bash(export PATH=\"$HOME/.cargo/bin:$PATH\")",
+      "Bash(wasm-bindgen --version)",
+      "Bash(wasm-bindgen --target no-modules --no-typescript --out-dir frontend/nfp --out-name nfp crates/nfp/target/wasm32-unknown-unknown/release/nfp.wasm)",
+      "Bash(wasm-bindgen --target nodejs --no-typescript --out-dir /tmp/nfptest --out-name nfp crates/nfp/target/wasm32-unknown-unknown/release/nfp.wasm)",
+      "Bash(node -e ' *)",
+      "Bash(cargo check *)",
+      "Bash(sudo -n true)",
+      "Bash(dpkg -l)",
+      "Bash(apt-cache policy *)",
+      "Bash(node --check frontend/electron-shim.js)",
+      "Bash(node --check frontend/nfp/nfp.js)",
+      "Bash(node -e 'JSON.parse\\(require\\('\\\\''fs'\\\\''\\).readFileSync\\('\\\\''__TRACKED_VAR__'\\\\'','\\\\''utf8'\\\\''\\)\\)')"
+    ]
+  }
+}

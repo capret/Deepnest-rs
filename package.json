@@ -1,0 +1,15 @@
+{
+  "name": "opennest-rs",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Deepnest (laser/CNC nesting tool) ported from Electron to Tauri.",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:nfp": "bash scripts/build-nfp.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
