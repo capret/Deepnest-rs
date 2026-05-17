@@ -1,0 +1,15 @@
+[package]
+name = "nest"
+version = "0.1.0"
+edition = "2021"
+description = "Native nesting engine for opennest-rs: a Rust port of Deepnest's background.js placement algorithm (placeParts, NFP, line merging). Replaces both the C++ Minkowski addon and the in-page ClipperLib usage."
+
+[lib]
+name = "nest"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+geo = "0.30"
+
+[dev-dependencies]
+serde_json = "1"

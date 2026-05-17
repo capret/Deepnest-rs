@@ -187,9 +187,24 @@
       return ipcRenderer;
     },
     send: function (channel, payload) {
+      // The nesting computation is no longer a hidden worker window — it runs
+      // natively in the `run_nest` Rust command. Intercept the renderer's
+      // `background-start` and turn it into an invoke; deliver the result back
+      // as `background-response` (and let Rust emit `background-progress`).
+      if (channel === "background-start") {
+        invoke("run_nest", { input: payload }).then(
+          function (result) {
+            if (tauriEvent.emit) tauriEvent.emit("background-response", result);
+          },
+          function (err) {
+            console.error("[shim] run_nest failed:", err);
+          }
+        );
+        return;
+      }
       if (channel === "background-stop") {
-        // The Electron build destroyed/recreated the worker window here; with
-        // a broadcast model the worker just idles until the next start.
+        // Electron destroyed/recreated the worker window here; the native
+        // run finishes on its own and the next start runs fresh.
         return;
       }
       if (tauriEvent.emit) tauriEvent.emit(channel, payload);
@@ -426,85 +441,18 @@
     fsMod.readFile(p, enc, cb);
   };
 
-  /* ------------------------------------------------------------- NFP/wasm -- */
-  // Drop-in replacement for the native `minkowski/Release/addon` C++ addon.
-  // The geometry is now Rust compiled to WebAssembly (see crates/nfp); the
-  // wasm-bindgen "no-modules" glue defines a global `wasm_bindgen`.
-  var nfpReady = false;
-  var nfpInitPromise = null;
-  function initNfp() {
-    if (nfpInitPromise) return nfpInitPromise;
-    if (typeof wasm_bindgen === "undefined") {
-      console.warn("[shim] nfp.js not loaded; NFP engine unavailable");
-      nfpInitPromise = Promise.reject(new Error("nfp.js not loaded"));
-      return nfpInitPromise;
-    }
-    nfpInitPromise = wasm_bindgen("nfp/nfp_bg.wasm")
-      .then(function () {
-        nfpReady = true;
-        console.log("[shim] NFP wasm engine ready");
-      })
-      .catch(function (e) {
-        console.error("[shim] NFP wasm init failed:", e);
-        throw e;
-      });
-    return nfpInitPromise;
-  }
-  function ringToObj(arr) {
-    var pts = [];
-    for (var i = 0; i < arr.length; i++) {
-      pts.push({ x: arr[i].x, y: arr[i].y });
-    }
-    var children = [];
-    if (arr && arr.children) {
-      for (var c = 0; c < arr.children.length; c++) {
-        var hole = [];
-        for (var j = 0; j < arr.children[c].length; j++) {
-          hole.push({ x: arr.children[c][j].x, y: arr.children[c][j].y });
-        }
-        children.push(hole);
-      }
-    }
-    return { points: pts, children: children };
-  }
-  function fromRingOut(r) {
-    var poly = [];
-    for (var i = 0; i < r.points.length; i++) {
-      poly.push({ x: r.points[i].x, y: r.points[i].y });
-    }
-    poly.children = (r.children || []).map(function (h) {
-      return h.map(function (p) {
-        return { x: p.x, y: p.y };
-      });
-    });
-    return poly;
-  }
+  /* --------------------------------------------------------------- addon -- */
+  // Deepnest's renderer required a native C++ NFP addon. All nesting geometry
+  // (NFP + the whole placement algorithm) now runs in the Rust `run_nest`
+  // command, so this is just a guard for any lingering reference — the worker
+  // window and background.js are no longer loaded.
   var addon = {
-    calculateNFP: function (group) {
-      if (!nfpReady) {
-        throw new Error("NFP wasm engine not ready yet");
-      }
-      var input = { A: ringToObj(group.A), B: ringToObj(group.B) };
-      var res = JSON.parse(wasm_bindgen.calculate_nfp(JSON.stringify(input)));
-      if (!Array.isArray(res)) {
-        throw new Error("NFP error: " + JSON.stringify(res));
-      }
-      return res.map(fromRingOut);
+    calculateNFP: function () {
+      throw new Error("NFP now runs in the Rust backend (run_nest), not the page");
     },
-    calculateNFPBatch: function (group) {
-      if (!nfpReady) {
-        throw new Error("NFP wasm engine not ready yet");
-      }
-      var input = {
-        Alist: (group.Alist || []).map(ringToObj),
-        B: ringToObj(group.B),
-      };
-      var res = JSON.parse(wasm_bindgen.calculate_nfp_batch(JSON.stringify(input)));
-      return res.map(function (one) {
-        return one.map(fromRingOut);
-      });
+    calculateNFPBatch: function () {
+      throw new Error("NFP now runs in the Rust backend (run_nest), not the page");
     },
-    ready: initNfp,
   };
 
   /* --------------------------------------------------------- package.json -- */
@@ -557,12 +505,6 @@
       on: function () {},
       cwd: function () { return "."; },
     };
-  }
-
-  // Start loading the NFP engine immediately if its glue is on the page
-  // (background.html), so it is ready well before nesting begins.
-  if (typeof wasm_bindgen !== "undefined") {
-    initNfp();
   }
 
   console.log("[shim] Electron compatibility layer installed");

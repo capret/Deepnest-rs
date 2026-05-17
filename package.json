@@ -7,7 +7,7 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "build:nfp": "bash scripts/build-nfp.sh"
+    "test:nest": "cargo test --manifest-path crates/nest/Cargo.toml"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

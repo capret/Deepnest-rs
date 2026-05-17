@@ -198,7 +198,22 @@
 				if(!relpath){
 					relpath = e.getAttribute('xlink:href');
 				}
-				var abspath = this.dirPath + '/' + relpath;
+				if(!relpath){
+					continue;
+				}
+				var abspath;
+				if(/^(data:|https?:)/i.test(relpath)){
+					// already an inline or remote image — leave it alone
+					abspath = relpath;
+				}
+				else{
+					abspath = this.dirPath + '/' + relpath;
+					// opennest-rs: the Tauri webview blocks raw file:// paths,
+					// so route embedded images through the asset protocol.
+					if(window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.convertFileSrc){
+						abspath = window.__TAURI__.core.convertFileSrc(abspath);
+					}
+				}
 				e.setAttribute('href', abspath);
 				e.setAttribute('data-href',relpath);
 			}

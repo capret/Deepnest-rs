@@ -19,20 +19,14 @@
         "minHeight": 600,
         "resizable": true,
         "center": true
-      },
-      {
-        "label": "background",
-        "url": "background.html",
-        "title": "opennest-rs worker",
-        "width": 600,
-        "height": 400,
-        "visible": false,
-        "focus": false,
-        "skipTaskbar": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     }
   },
   "bundle": {

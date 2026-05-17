@@ -18,7 +18,15 @@
       "Bash(apt-cache policy *)",
       "Bash(node --check frontend/electron-shim.js)",
       "Bash(node --check frontend/nfp/nfp.js)",
-      "Bash(node -e 'JSON.parse\\(require\\('\\\\''fs'\\\\''\\).readFileSync\\('\\\\''__TRACKED_VAR__'\\\\'','\\\\''utf8'\\\\''\\)\\)')"
+      "Bash(node -e 'JSON.parse\\(require\\('\\\\''fs'\\\\''\\).readFileSync\\('\\\\''__TRACKED_VAR__'\\\\'','\\\\''utf8'\\\\''\\)\\)')",
+      "Bash(sed -n '620,660p' main/background.js)",
+      "Bash(sed -n '850,935p' main/background.js)",
+      "Bash(cargo test *)",
+      "Bash(node -e \"let fs=require\\('fs'\\); let g=fs.readFileSync\\('.gitignore','utf8'\\); g=g.replace\\('crates/nfp/target','crates/nest/target'\\); fs.writeFileSync\\('.gitignore',g\\); console.log\\('gitignore: '+\\(g.includes\\('crates/nest/target'\\)?'updated':'unchanged'\\)\\)\")",
+      "Bash(sed -n '188,215p' main/svgparser.js)",
+      "Bash(sed -n '825,865p' main/deepnest.js)",
+      "Bash(node --check frontend/svgparser.js)",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('src-tauri/tauri.conf.json','utf8'\\)\\)\")"
     ]
   }
 }
