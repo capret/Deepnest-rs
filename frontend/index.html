@@ -811,7 +811,16 @@
 			  }
 			};
 			
+			// opennest-rs: pending cleanup scheduled by the Back button. It
+			// must be cancelled when a new nest starts, or it fires mid-nest
+			// and wipes the fresh nest's state (leaving the panel empty).
+			var backCleanupTimer = null;
+
 			var startnest = function(){
+				if(backCleanupTimer){
+					clearTimeout(backCleanupTimer);
+					backCleanupTimer = null;
+				}
 				/*function toClipperCoordinates(polygon){
 					var clone = [];
 					for(var i=0; i<polygon.length; i++){
@@ -956,7 +965,8 @@
 			var back = document.querySelector('#back');
 			back.onclick = function(e){
 						
-				setTimeout(function(){
+				backCleanupTimer = setTimeout(function(){
+					backCleanupTimer = null;
 					if(DeepNest.working){
 						ipcRenderer.send('background-stop');
 						DeepNest.stop();

@@ -945,10 +945,14 @@
 			displayCallback = d;
 			
 			var parts = [];
-			
-			/*while(this.nests.length > 0){
+
+			// opennest-rs: start every nest from a clean slate so re-nesting
+			// (e.g. after Back) works. A stale GA whose population is already
+			// fully evaluated would dispatch no work and leave the panel empty.
+			GA = null;
+			while(this.nests.length > 0){
 				this.nests.pop();
-			}*/
+			}
 			
 			// opennest-rs: part prep (clone + offset) runs time-boxed in
 			// prepBatch() below so it never freezes the window.
