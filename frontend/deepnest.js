@@ -950,23 +950,8 @@
 				this.nests.pop();
 			}*/
 			
-			// send only bare essentials through ipc
-			for(var i=0; i<this.parts.length; i++){
-				parts.push({
-					quantity: this.parts[i].quantity,
-					sheet: this.parts[i].sheet,
-					polygontree: this.cloneTree(this.parts[i].polygontree)
-				});
-			}
-			
-			for(i=0; i<parts.length; i++){
-				if(parts[i].sheet){
-					offsetTree(parts[i].polygontree, -0.5*config.spacing, this.polygonOffset.bind(this), this.simplifyPolygon.bind(this), true);
-				}
-				else{
-					offsetTree(parts[i].polygontree, 0.5*config.spacing, this.polygonOffset.bind(this), this.simplifyPolygon.bind(this));
-				}
-			}
+			// opennest-rs: part prep (clone + offset) runs time-boxed in
+			// prepBatch() below so it never freezes the window.
 						
 			// offset tree recursively
 			function offsetTree(t, offset, offsetFunction, simpleFunction, inside){
@@ -1006,17 +991,46 @@
 			
 			var self = this;
 			this.working = true;
-			
-			if(!workerTimer){
-				workerTimer = setInterval(function(){
-					self.launchWorkers.call(self, parts, config, progressCallback, displayCallback);
-					//progressCallback(progress);
-				}, 100);
+
+			// opennest-rs: clone + offset each part in short time-boxed batches
+			// across the event loop, so this heavy geometry prep never freezes
+			// the window. Nesting begins once every part has been prepared.
+			var idx = 0;
+			function prepBatch(){
+				if(!self.working){
+					return; // stopped before prep finished
+				}
+				var deadline = Date.now() + 8;
+				while(idx < self.parts.length && Date.now() < deadline){
+					var part = {
+						quantity: self.parts[idx].quantity,
+						sheet: self.parts[idx].sheet,
+						polygontree: self.cloneTree(self.parts[idx].polygontree)
+					};
+					if(part.sheet){
+						offsetTree(part.polygontree, -0.5*config.spacing, self.polygonOffset.bind(self), self.simplifyPolygon.bind(self), true);
+					}
+					else{
+						offsetTree(part.polygontree, 0.5*config.spacing, self.polygonOffset.bind(self), self.simplifyPolygon.bind(self));
+					}
+					parts.push(part);
+					idx++;
+				}
+				if(idx < self.parts.length){
+					setTimeout(prepBatch, 0);
+				}
+				else if(!workerTimer){
+					workerTimer = setInterval(function(){
+						self.launchWorkers.call(self, parts, config, progressCallback, displayCallback);
+					}, 100);
+				}
 			}
+			prepBatch();
 		}
 		
 		ipcRenderer.on('background-response', (event, payload) => {
-			console.log('ipc response',payload);
+			// opennest-rs: log a summary, not the whole (large) payload object
+			console.log('ipc response: index', payload.index, 'fitness', payload.fitness);
 			if(!GA){
 				// user might have quit while we're away
 				return;
@@ -1127,9 +1141,11 @@
 			
 			
 			for(i=0; i<GA.population.length; i++){
-				// opennest-rs: each nest now runs on its own Rust worker thread
-				// (run_nest), so the original multi-worker throttle is restored.
-				if(running < (config.threads || 1) && !GA.population[i].processing && !GA.population[i].fitness){
+				// opennest-rs: each nest runs on its own Rust worker thread
+				// (run_nest); cap parallelism at cores-1 so a CPU core is
+				// always left free for the UI thread (smooth window drag).
+				var maxThreads = Math.max(1, Math.min(config.threads || 4, (navigator.hardwareConcurrency || 4) - 1));
+				if(running < maxThreads && !GA.population[i].processing && !GA.population[i].fitness){
 					GA.population[i].processing = true;
 										
 					// hash values on arrays don't make it across ipc, store them in an array and reassemble on the other side....
