@@ -271,4 +271,19 @@ mod tests {
             .sum();
         assert_eq!(placed, 2, "both parts should be placed");
     }
+
+    #[test]
+    fn rotation_fallback_tries_every_allowed_orientation() {
+        let config: Config = serde_json::from_str(r#"{"placementType":"box","rotations":32}"#).unwrap();
+        let mut part = rect(90., 10.);
+        part.source = 0;
+        part.id = 0;
+        part.rotation = 112.5;
+        let mut sheet = rect(20., 100.);
+        sheet.source = 100;
+        let result = place_parts(vec![sheet], vec![part], &config, &NfpCache::default(), |_| {}, || false);
+        let placements: Vec<_> = result.placements.iter().flat_map(|s| &s.sheetplacements).collect();
+        assert_eq!(placements.len(), 1);
+        assert!((placements[0].rotation - 270.).abs() < 1e-6);
+    }
 }

@@ -1,122 +1,152 @@
-# opennest-rs
+# Deepnest
 
-**Deepnest** — the nesting tool for laser cutters and other CNC tools —
-ported from **Electron** to **Tauri**, with its entire nesting computation
-rewritten in native **Rust**.
+A native Rust nesting workspace built with **Iced 0.14**. Import SVG or DXF parts,
+set quantities and stock dimensions, find a cutting layout, and export SVG or DXF.
 
-This workspace began as a Tauri + Vue scaffold; the scaffold was removed and
-replaced with Deepnest's application running on a Tauri shell.
+The Graphite interface puts light material sheets on a dark, full-height canvas.
+Parts and stock live in one collapsible sidebar. Animation is part of the interface
+design: there are no animation controls or animation settings in project files.
 
-## What was migrated
+## Run
 
-| Concern | Electron (Deepnest) | Tauri (opennest-rs) |
-|---|---|---|
-| App shell | Electron main process (`main.js`) | `src-tauri` (Rust) |
-| UI | `main/` HTML/JS (Ractive, interact.js) | `frontend/` — same code, unchanged |
-| Nesting computation | hidden `BrowserWindow` running `background.js` | **native Rust** (`crates/nest`) |
-| NFP geometry | C++ N-API addon (`minkowski.cc`, Boost.Polygon) | Rust (`crates/nest/src/nfp.rs`) |
-| Polygon clipping | in-page ClipperLib | Rust `geo` boolean ops (`crates/nest/src/clip.rs`) |
-| `require('electron')`, `fs`, `path`, … | Node integration in the renderer | `frontend/electron-shim.js` |
-| Renderer ↔ worker IPC | `ipcMain` routing + worker window | one `run_nest` Tauri command |
-| Settings | `electron-settings` | `localStorage` (via the shim) |
-| File dialogs | `electron.remote.dialog` | `tauri-plugin-dialog` |
+Install a Rust toolchain (1.88 or later), then:
 
-### The nesting engine (`crates/nest`)
-
-Deepnest ran its placement algorithm in a hidden Electron window
-(`background.js`), leaning on a native C++ addon for No-Fit-Polygon math and
-on ClipperLib for polygon booleans. None of that survives in a Tauri webview,
-so the **whole computation was ported to a native Rust crate**:
-
-- `nfp.rs` — No-Fit-Polygon via Minkowski-sum convolution (was `minkowski.cc`).
-- `clip.rs` — polygon union/difference via the `geo` crate (was ClipperLib).
-- `place.rs` — `placeParts`, `getInnerNfp`/`getOuterNfp`, line merging.
-- `geom.rs` — geometry primitives (area, bounds, rotation, convex hull).
-- `lib.rs` — the `run` entry point, plus unit tests.
-
-It is plain native Rust (no webview/wasm toolchain), so the algorithm is
-**unit-tested directly** — `cargo test` covers NFP, boolean ops, and a full
-placement.
-
-The renderer calls it through the `run_nest` command, which returns
-immediately and runs the placement on a **worker thread** — the UI thread
-never blocks. Progress and the finished layout come back as
-`background-progress` / `background-response` events. The NFP cache is
-thread-safe, so the genetic algorithm's individuals are evaluated **in
-parallel** (up to `config.threads` at once).
-
-### The compatibility shim (`frontend/electron-shim.js`)
-
-Loaded as the first script in `index.html`, it installs a `window.require`
-returning Tauri-backed implementations of every Node/Electron module Deepnest
-uses. It also intercepts the renderer's `background-start` message and turns
-it into a `run_nest` invoke — so `deepnest.js` itself is unchanged.
-
-## Project layout
-
-```
-opennest-rs/
-├── frontend/            Deepnest's UI (the Tauri frontend, served statically)
-│   ├── electron-shim.js   Electron→Tauri compatibility layer
-│   ├── deepnest.js        Deepnest renderer + genetic algorithm (unchanged)
-│   ├── index.html         main window
-│   └── util/ img/ font/ … unchanged Deepnest assets
-│   └── background.*       original Electron worker — kept for reference, unused
-├── crates/nest/         native Rust nesting engine (NFP + placement)
-└── src-tauri/           Tauri Rust backend (run_nest + file-IO commands)
+```sh
+cargo run -p deepnest-app
+cargo test --workspace
+cargo build --release -p deepnest-app
 ```
 
-## Building & running
+Iced uses a native window and a GPU renderer. Cargo builds the entire application.
+On Linux, the platform's windowing/graphics and desktop file-dialog services must
+be available.
 
-### Prerequisites
+On macOS, build an application bundle:
 
-- Rust + Cargo
-- Node.js (for the Tauri CLI) — `npm install`
-- **Platform webview libraries:**
-  - **Windows** — WebView2 (preinstalled on Windows 10/11). Builds out of the box.
-  - **Linux / WSL** — install the WebKitGTK dev packages:
-    ```
-    sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \
-      libayatana-appindicator3-dev librsvg2-dev patchelf \
-      build-essential curl wget file libssl-dev libxdo-dev
-    ```
-
-### Commands
-
-```
-npm install
-npm run dev        # tauri dev
-npm run build      # tauri build (installer/bundle)
-npm run test:nest  # cargo test for the nesting engine
+```sh
+bash scripts/bundle-macos.sh          # target/release/Deepnest.app
+bash scripts/bundle-macos.sh --debug  # target/debug/Deepnest.app
 ```
 
-## Status & known limitations
+These are local development bundles, without signing or notarization.
 
-**Working / ported:** project structure, the full nesting engine (NFP,
-boolean clipping, placement, line merging — unit-tested), the Electron→Tauri
-shim, settings, file dialogs, file read/write, the `run_nest` command and its
-progress events.
+## Workflow
 
-**Degrades gracefully (needs deepnest.io's backend, which is not part of this
-project):**
+1. Import local SVG/DXF files, or use the bundled Assembly kit sample. Drag-and-drop
+   works for both formats and `.deepnest` projects.
+2. Select a part in the sidebar or canvas to change its quantity. The source
+   preview shows one of each shape; nesting uses all copies.
+3. Set stock width, height, sheet count, and part gap in your display units. Apply edits
+   with Enter or **Apply**; nesting and saving also validate pending edits.
+4. Choose **Nest parts**. The worker searches arrangements without blocking the
+   interface. **Stop** keeps the best completed result.
+5. Switch sheets, pan, zoom, and inspect the result. Choose **SVG** or **DXF** beside
+   **Export**. Placed sheets are stacked vertically. SVG uses millimeters; DXF
+   uses the chosen export units and a separate layer for each sheet. Shared-line
+   cutting exports each touching edge once when the part gap is zero.
+6. Save a `.deepnest` project to retain source geometry, quantities, stock, and
+   search settings. Layouts are recomputed on demand. Undo restores project edits.
 
-- **DXF/CDR import** — Deepnest uploaded these to a conversion server. SVG
-  import works locally; DXF/CDR shows a "server unavailable" message.
-- **Cloud export** (DXF/G-code via deepnest.io) — same. **SVG export works**.
-- **Auth0 login / accounts** — stubbed.
+The footer reports unplaced parts when stock is insufficient. A partial layout
+can be exported; it contains only the placed parts.
 
-**Faithfulness notes:** the Rust engine is a close port of `background.js`.
-Two deliberate departures from the original: `mergedLength` keeps its
-short-edge cutoff constant (the original reused one variable via JS `var`
-hoisting), and the NFP cache also stores hole-free inner NFPs (a pure speed
-win, identical results).
+| Shortcut | Action |
+| --- | --- |
+| Cmd/Ctrl + I | Import SVG / DXF |
+| Cmd/Ctrl + O | Open project |
+| Cmd/Ctrl + S | Save project |
+| Cmd/Ctrl + E | Export cutting layout |
+| Cmd/Ctrl + Enter | Start nesting |
+| Cmd/Ctrl + Z | Undo |
+| Cmd/Ctrl + , | Nesting settings and illustrated guide |
+| Escape | Stop nesting / close menus |
+| Tab / Shift + Tab | Move between editable controls |
 
-**Not yet verified end-to-end:** the engine is unit-tested and the Tauri
-shell/shim compile, but a full click-through inside a running webview has not
-been done here (the WSL environment used for the port lacks the Linux webview
-libraries). Expect to iterate on runtime details on first run.
+Scroll to zoom around the mouse pointer, drag empty canvas (or middle-drag
+anywhere) to pan, and use the fit button to recenter. The point under the cursor
+stays fixed throughout the zoom animation; dragging interrupts it immediately.
 
----
+## Nesting settings
 
-Original Deepnest © Jack Qiao — <https://deepnest.io> — based on
-[SVGNest](https://github.com/Jack000/SVGnest).
+Open the settings button in the toolbar or **Nesting options → All settings & guide**.
+Five sections restore the original 16 controls: display units, spacing, all 1–32
+rotation counts, placement strategy, curve/endpoint tolerances, rough approximation,
+CPU workers, SVG scale, DXF import/export units, shared cuts, cutting-time weight,
+population size, and mutation rate. Each has a visual explanation and practical
+examples. Settings use an Apply/Cancel draft, support Reset and Undo, and save with
+the project. Import settings apply to subsequent imports.
+
+Search uses a genetic population with crossover, mutation, and elitism. Choose
+an evaluation budget or search until stopped, using up to eight parallel workers.
+See the [original-settings comparison](docs/settings-parity.md) for the complete
+mapping, compatibility details, and test coverage.
+
+## Design system
+
+The native UI follows [shadcn's semantic token convention](https://ui.shadcn.com/docs/theming),
+implemented in Rust rather than CSS:
+
+- `crates/app/src/tokens.rs`: semantic colors, typography, spacing, corner radii,
+  and common control dimensions.
+- `crates/app/src/style.rs`: shared button variants, inputs, floating surfaces,
+  scrollbars, and selects.
+- `crates/app/src/motion.rs`: centrally chosen transitions for layout and camera
+  movement. Layout uses a Time spring with **0.20 s visual duration / 0.25 bounce**.
+- `crates/motion`: reusable, frame-rate-independent Time springs, physical
+  springs (stiffness/damping/mass), and cubic Bézier easing.
+
+Spring interruptions preserve current velocity. Sidebar and nesting-option folds
+use clipped reveals, keeping their content stable while opening or closing.
+Tooltips share one animated surface: the first waits 350 ms, then neighboring
+hints slide into place without repeating the delay. Camera movement uses a
+non-bouncy spring. Direct manipulation stays immediate. Frame updates stop when
+animations settle. On macOS the app reads the system Reduce Motion preference
+once when first needed; when enabled, transitions settle immediately.
+
+See [the design-system guide](docs/design-system.md) for token and transition examples.
+
+## Code layout
+
+```text
+crates/app/       Iced UI, SVG/DXF import/export, project model, cancellable worker
+crates/motion/    Analytic spring and Bézier transition engine
+crates/nest/      Native NFP geometry, polygon operations, and placement
+resources/macos/ Application bundle metadata and icon
+scripts/         Local bundle creation
+```
+
+The new worker expands outlines for the requested part gap, uses a per-job NFP
+cache, evaluates genetic populations, and validates candidates for overlap and
+sheet bounds before displaying or exporting them. It checks cancellation between
+placement operations. NFP convolution includes every boundary vertex to avoid
+false holes for curved outlines.
+
+## Scope and limitations
+
+- Local SVG import supports closed vector paths, common shapes, viewBox/units,
+  transforms, and contained holes. Curves use the configured tolerance (0.1 mm by default);
+  exports use those polygonal outlines, not the original Bézier curves.
+- Contours that cannot be closed within the endpoint tolerance, text, raster
+  images, and clipped/masked/filtered groups are skipped and reported. Convert
+  these to plain closed paths before importing.
+- DXF import supports ASCII and binary DXF with 2D LINE/ARC chains, CIRCLE,
+  LWPOLYLINE/POLYLINE (including bulges), ELLIPSE, and nested single block INSERTs
+  with scaling and rotation. Declared units convert to millimeters. Unitless
+  drawings are treated as millimeters, with a visible import notice. Endpoint
+  joining and curve tolerances are configurable (0.01 mm and 0.1 mm by default).
+- DXF splines, text, hatches, meshes, tilted 3D geometry, external references,
+  and array INSERTs are skipped and reported. Convert those objects to plain
+  2D polylines first. Disconnected open contours are not turned into cut shapes.
+- Stock is rectangular. Exports contain cut geometry and holes, without a stock
+  outline or machine-specific G-code. DXF export writes polygonal outlines or
+  shared cut segments when shared-line cutting is enabled with zero part gap.
+- CDR conversion, cloud accounts, and cloud export are not part of the Iced app.
+- The search is heuristic, not a guarantee of an optimal arrangement.
+- Tests cover SVG/DXF units and holes, binary DXF, bulges, block transforms,
+  connected contours, export round trips, shared tooltip timing, project validation,
+  cursor-anchored zoom, stale-layout invalidation, save revision handling,
+  nesting collisions/gaps, curved NFPs, and the motion math.
+
+Original Deepnest © Jack Qiao — [deepnest.io](https://deepnest.io) — based on
+[SVGNest](https://github.com/Jack000/SVGnest). Original attribution is preserved
+in [LICENSE](LICENSE).

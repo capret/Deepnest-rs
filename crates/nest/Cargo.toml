@@ -9,7 +9,7 @@ name = "nest"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-geo = "0.30"
+geo = "0.31"
 
 [dev-dependencies]
 serde_json = "1"

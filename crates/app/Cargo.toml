@@ -1,0 +1,24 @@
+[package]
+name = "deepnest-app"
+version = "0.2.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Deepnest — a native Iced nesting workspace"
+default-run = "deepnest"
+
+[[bin]]
+name = "deepnest"
+path = "src/main.rs"
+
+[dependencies]
+iced = { version = "0.14", features = ["advanced", "canvas", "tokio"] }
+deepnest-motion = { path = "../motion" }
+nest = { path = "../nest" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+usvg = { version = "0.46", default-features = false }
+lyon_geom = "1"
+geo = "0.31"
+dxf = "0.6.2"
+rfd = "0.15"
+tokio = { version = "1", features = ["rt", "sync", "time"] }

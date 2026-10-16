@@ -1,0 +1,9 @@
+[package]
+name = "deepnest-motion"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Interruptible spring and cubic Bezier transitions for Deepnest's Iced UI"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

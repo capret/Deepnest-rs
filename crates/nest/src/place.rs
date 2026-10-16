@@ -3,7 +3,7 @@
 //!
 //! One call to [`place_parts`] evaluates a single GA individual: it places
 //! every part onto sheets and returns a fitness score. Deepnest ran this in a
-//! hidden Electron window; here it runs natively in one `run_nest` command.
+//! hidden Electron window; here the Iced app calls the native Rust engine.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -20,7 +20,7 @@ use crate::Config;
 
 /// Persistent No-Fit-Polygon cache (Deepnest's `window.nfpcache` / `db`).
 ///
-/// Shared across `run_nest` calls so repeated part pairs are computed once.
+/// Shared across placement calls so repeated part pairs are computed once.
 /// Each map carries its own lock, held only for the brief get/insert — the
 /// heavy NFP computation happens lock-free — so several nests can run on
 /// different threads in parallel and still share results. `&NfpCache` is
@@ -352,7 +352,7 @@ pub fn place_parts(
     } else {
         360.0
     };
-    let rot_iters = (360.0 / config.rotations.max(1.0)).max(1.0) as i64;
+    let rot_iters = config.rotations.round().max(1.0) as i64;
 
     while !parts.is_empty() {
         if sheets.is_empty() || cancelled() {

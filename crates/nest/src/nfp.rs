@@ -108,18 +108,19 @@ pub fn nfp(a: &Poly, b: &Poly) -> Vec<Poly> {
         .map(|p| Pt::new(-p.x, -p.y))
         .collect();
 
-    // Convolution: every ring of `a` against `b`, plus the vertex/polygon
-    // translation terms (mirrors `convolve_two_polygon_sets`).
+    // Sweep every boundary edge pair, then include the polygon at every
+    // vertex. Using only the first vertex leaves false holes near the origin
+    // for curved/holed parts; placement can mistake those holes for free space.
     let mut pieces: Vec<Polygon<f64>> = Vec::new();
     let a_rings = std::iter::once(&a_ext).chain(a_holes.iter());
     for ar in a_rings {
         convolve_rings(&mut pieces, ar, &b_ext);
+        for &vertex in ar {
+            pieces.push(translated(&b_ext, &[], vertex));
+        }
     }
-    if let Some(&b0) = b_ext.first() {
-        pieces.push(translated(&a_ext, &a_holes, b0));
-    }
-    if let Some(&a0) = a_ext.first() {
-        pieces.push(translated(&b_ext, &[], a0));
+    for &vertex in &b_ext {
+        pieces.push(translated(&a_ext, &a_holes, vertex));
     }
     if pieces.is_empty() {
         return Vec::new();
