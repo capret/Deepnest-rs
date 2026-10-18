@@ -4,15 +4,15 @@ use crate::{
     settings::{Action, CadUnit, Dialog, Help, Number, Placement, Section, Units},
     style::{self, Button},
     tokens::{color::*, radius, space as gap, typography::*},
-    Message,
+    widgets, Message,
 };
 use iced::widget::canvas::{Frame, Geometry, Path, Stroke};
 use iced::{
     alignment::Vertical,
     mouse,
     widget::{
-        button, canvas, checkbox, column, container, mouse_area, opaque, pick_list, row,
-        scrollable, space, text, text_input, Column,
+        button, canvas, checkbox, column, container, mouse_area, opaque, pick_list, row, space,
+        text, text_input, Column,
     },
     Element, Fill, Point, Rectangle, Renderer, Size, Theme,
 };
@@ -157,28 +157,30 @@ pub fn dialog(d: &Dialog, window: Size) -> Element<'_, Message> {
         }
     };
     let (title, explanation, tip) = help_copy(d.help);
-    let guide = container(
-        scrollable(
-            column![
-                text("HOW IT WORKS").size(CAPTION).font(MONO).color(SUBTLE),
-                canvas(Example(d)).width(Fill).height(182),
-                text(title).size(HEADING).font(BOLD),
-                text(explanation).size(BODY).color(FOREGROUND),
-                text(tip).size(SMALL).color(MUTED_FOREGROUND),
-            ]
-            .spacing(gap::MD),
-        )
-        .style(style::scroll),
-    )
+    let guide = container(widgets::scroll_region(
+        "settings-guide",
+        column![
+            text("HOW IT WORKS").size(CAPTION).font(MONO).color(SUBTLE),
+            canvas(Example(d)).width(Fill).height(182),
+            text(title).size(HEADING).font(BOLD),
+            text(explanation).size(BODY).color(FOREGROUND),
+            text(tip).size(SMALL).color(MUTED_FOREGROUND),
+        ]
+        .spacing(gap::MD),
+    ))
     .padding(gap::LG)
     .width(300)
     .height(Fill)
     .style(style::inset);
+    let mut body = row![widgets::scroll_region("settings-fields", fields)].height(Fill);
+    if window.width >= 800. {
+        body = body.push(guide).spacing(gap::LG);
+    }
     let content = container(
         column![
             row![
                 column![
-                    text("Nesting settings").size(TITLE).font(BOLD),
+                    text("Project settings").size(TITLE).font(BOLD),
                     text("Fine control, with a clear view of what each choice changes.")
                         .size(BODY)
                         .color(MUTED_FOREGROUND)
@@ -193,15 +195,7 @@ pub fn dialog(d: &Dialog, window: Size) -> Element<'_, Message> {
             .align_y(Vertical::Center),
             tabs,
             line(),
-            row![
-                scrollable(fields)
-                    .style(style::scroll)
-                    .width(Fill)
-                    .height(Fill),
-                guide
-            ]
-            .spacing(gap::LG)
-            .height(Fill),
+            body,
             line(),
             text(d.error.as_deref().unwrap_or(
                 "Settings are saved with this project. Apply changes when you’re ready."
@@ -234,7 +228,7 @@ pub fn dialog(d: &Dialog, window: Size) -> Element<'_, Message> {
     .padding(gap::LG)
     .width(936)
     .height((window.height - 64.).clamp(550., 720.))
-    .style(style::floating);
+    .style(style::dialog);
     container(opaque(content))
         .center_x(Fill)
         .center_y(Fill)
@@ -290,7 +284,8 @@ impl canvas::Program<Message> for Example<'_> {
             })
         };
         let rect = |f: &mut Frame, x, y, w, h, color| {
-            let p = Path::rounded_rectangle(Point::new(x, y), Size::new(w, h), radius::SM.into());
+            let p =
+                Path::rounded_rectangle(Point::new(x, y), Size::new(w, h), radius::BADGE.into());
             f.fill(&p, color);
             f.stroke(&p, Stroke::default().with_color(BORDER));
         };

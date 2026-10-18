@@ -6,7 +6,7 @@ use crate::{
 };
 use iced::{
     alignment, mouse,
-    widget::canvas::{self, Frame, Geometry, Path, Stroke},
+    widget::canvas::{self, path::Arc, Frame, Geometry, LineCap, Path, Stroke},
     Color, Point, Rectangle, Renderer, Size, Theme, Vector,
 };
 use nest::Pt;
@@ -200,7 +200,7 @@ impl canvas::Program<Message> for Workspace<'_> {
         let mut frame = Frame::new(renderer, bounds.size());
         let mut labels = Frame::new(renderer, bounds.size());
         let size = frame.size();
-        frame.fill_rectangle(Point::ORIGIN, size, BACKGROUND);
+        frame.fill_rectangle(Point::ORIGIN, size, CANVAS);
         if self.0.show_grid {
             for x in (12..size.width as usize).step_by(24) {
                 for y in (12..size.height as usize).step_by(24) {
@@ -213,12 +213,47 @@ impl canvas::Program<Message> for Workspace<'_> {
         let sheet_size = Size::new(stock.width as f32 * scale, stock.height as f32 * scale);
         // Keep geometry in one frame: nested clipped frames can reorder meshes
         // behind the parent's background in Iced's WGPU renderer.
-        frame.fill_rectangle(origin + Vector::new(0., 8.), sheet_size, SHADOW);
         frame.fill_rectangle(origin, sheet_size, SHEET);
         frame.stroke(
             &Path::rectangle(origin, sheet_size),
             Stroke::default().with_width(1.).with_color(SHEET_BORDER),
         );
+        // Quiet points inside the stock retain its scale without competing with cuts.
+        if self.0.show_grid {
+            let spacing = (20.0 * scale).max(12.0);
+            let mut x = origin.x + spacing;
+            while x < origin.x + sheet_size.width {
+                let mut y = origin.y + spacing;
+                while y < origin.y + sheet_size.height {
+                    frame.fill(&Path::circle(Point::new(x, y), 0.65), alpha(CUT_LINE, 0.16));
+                    y += spacing;
+                }
+                x += spacing;
+            }
+        }
+        // Registration corners give the material a precise, illuminated edge.
+        for (x, y, dx, dy) in [
+            (origin.x, origin.y, 1., 1.),
+            (origin.x + sheet_size.width, origin.y, -1., 1.),
+            (origin.x, origin.y + sheet_size.height, 1., -1.),
+            (
+                origin.x + sheet_size.width,
+                origin.y + sheet_size.height,
+                -1.,
+                -1.,
+            ),
+        ] {
+            frame.stroke(
+                &Path::new(|p| {
+                    p.move_to(Point::new(x, y + 12. * dy));
+                    p.line_to(Point::new(x, y));
+                    p.line_to(Point::new(x + 12. * dx, y));
+                }),
+                Stroke::default()
+                    .with_width(1.5)
+                    .with_color(alpha(PRIMARY, 0.65)),
+            );
+        }
 
         // Choose ruler spacing in physical units, keeping labels ~80px apart.
         let units = self.0.project.settings.units;
@@ -281,7 +316,7 @@ impl canvas::Program<Message> for Workspace<'_> {
                 fill(if selected {
                     SELECTED_PART
                 } else {
-                    PARTS[placement.part % PARTS.len()]
+                    alpha(PARTS[placement.part % PARTS.len()], 0.16)
                 }),
             );
             frame.stroke(
@@ -291,7 +326,7 @@ impl canvas::Program<Message> for Workspace<'_> {
                     .with_color(if selected {
                         SELECTED_CUT_LINE
                     } else {
-                        CUT_LINE
+                        alpha(PARTS[placement.part % PARTS.len()], 0.85)
                     }),
             );
             let b = part.bounds();
@@ -320,17 +355,6 @@ impl canvas::Program<Message> for Workspace<'_> {
                 }
             }
         }
-        label(
-            &mut labels,
-            if self.0.layout.is_some() {
-                format!("SHEET {:02}", self.0.sheet + 1)
-            } else {
-                "SOURCE PREVIEW".into()
-            },
-            Point::new(origin.x, origin.y + sheet_size.height + 16.),
-            CAPTION,
-            SUBTLE,
-        );
         // Text gets a final pass so rulers remain visible outside the paper.
         vec![frame.into_geometry(), labels.into_geometry()]
     }
@@ -380,13 +404,178 @@ impl canvas::Program<Message> for Thumbnail<'_> {
         let path = path(self.part, |p| {
             origin + Vector::new((p.x - b.x) as f32 * scale, (p.y - b.y) as f32 * scale)
         });
-        frame.fill(&path, fill(alpha(PARTS[self.index % PARTS.len()], 0.75)));
+        frame.fill(&path, fill(alpha(PARTS[self.index % PARTS.len()], 0.18)));
         frame.stroke(
             &path,
             Stroke::default()
                 .with_width(1.)
                 .with_color(PARTS[self.index % PARTS.len()]),
         );
+        vec![frame.into_geometry()]
+    }
+}
+
+/// A quiet halo around the real nesting action, sampled by the shared motion loop.
+pub struct NestRing {
+    pub progress: f64,
+}
+impl canvas::Program<Message> for NestRing {
+    type State = ();
+
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &Renderer,
+        _: &Theme,
+        bounds: Rectangle,
+        _: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let center = Point::new(bounds.width / 2., bounds.height / 2.);
+        let diameter = bounds.width.min(bounds.height);
+        let ring_radius = diameter * 0.4125;
+        for (ratio, opacity) in [(0.48125, 0.025), (0.4125, 0.035), (0.35, 0.055)] {
+            frame.fill(
+                &Path::circle(center, diameter * ratio),
+                alpha(PRIMARY, opacity),
+            );
+        }
+        frame.stroke(
+            &Path::circle(center, ring_radius),
+            Stroke::default()
+                .with_width(3.)
+                .with_color(alpha(PRIMARY, 0.12)),
+        );
+        let sweep = self.progress.clamp(0., 1.) as f32;
+        let start = -std::f32::consts::FRAC_PI_2;
+        let end = start + std::f32::consts::TAU * sweep;
+        let ring = Path::new(|p| {
+            p.arc(Arc {
+                center,
+                radius: ring_radius,
+                start_angle: iced::Radians(start),
+                end_angle: iced::Radians(end),
+            });
+        });
+        frame.stroke(
+            &ring,
+            Stroke::default()
+                .with_width(3.)
+                .with_line_cap(LineCap::Round)
+                .with_color(alpha(PRIMARY, 0.7)),
+        );
+        let tip = center + Vector::new(end.cos() * ring_radius, end.sin() * ring_radius);
+        frame.fill(&Path::circle(tip, 3.), PRIMARY);
+        vec![frame.into_geometry()]
+    }
+}
+
+/// Small sheet previews use the original cut contours, including interior holes.
+pub struct SheetPreview<'a> {
+    pub project: &'a Project,
+    pub placements: &'a [PlacedPart],
+}
+impl canvas::Program<Message> for SheetPreview<'_> {
+    type State = ();
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &Renderer,
+        _: &Theme,
+        bounds: Rectangle,
+        _: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let stock = &self.project.stock;
+        let scale = ((bounds.width - 8.) / stock.width as f32)
+            .min((bounds.height - 8.) / stock.height as f32);
+        let size = Size::new(stock.width as f32 * scale, stock.height as f32 * scale);
+        let origin = Point::new(
+            (bounds.width - size.width) / 2.,
+            (bounds.height - size.height) / 2.,
+        );
+        frame.fill_rectangle(origin, size, SHEET);
+        frame.stroke(
+            &Path::rectangle(origin, size),
+            Stroke::default().with_color(SHEET_BORDER).with_width(1.),
+        );
+        for placed in self.placements {
+            let outline = path(&self.project.parts[placed.part], |point| {
+                let point = transformed(point, placed);
+                origin + Vector::new(point.x as f32 * scale, point.y as f32 * scale)
+            });
+            let color = PARTS[placed.part % PARTS.len()];
+            frame.fill(&outline, fill(alpha(color, 0.32)));
+            frame.stroke(
+                &outline,
+                Stroke::default()
+                    .with_color(alpha(color, 0.8))
+                    .with_width(0.65),
+            );
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+/// Observed utilization over elapsed search time; no synthetic history points.
+pub struct SearchTrend<'a> {
+    pub samples: &'a [crate::studio::Sample],
+    pub elapsed: f64,
+}
+impl canvas::Program<Message> for SearchTrend<'_> {
+    type State = ();
+    fn draw(
+        &self,
+        _: &(),
+        renderer: &Renderer,
+        _: &Theme,
+        bounds: Rectangle,
+        _: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let (w, h) = ((bounds.width - 8.).max(1.), (bounds.height - 10.).max(1.));
+        for i in 0..=3 {
+            let y = 5. + h * i as f32 / 3.;
+            frame.stroke(
+                &Path::line(Point::new(4., y), Point::new(w + 4., y)),
+                Stroke::default()
+                    .with_width(1.)
+                    .with_color(alpha(BORDER, 0.7)),
+            );
+        }
+        if let Some(first) = self.samples.first() {
+            let duration = self
+                .elapsed
+                .max(self.samples.last().unwrap().elapsed)
+                .max(0.01);
+            let point = |sample: &crate::studio::Sample| {
+                Point::new(
+                    4. + (sample.elapsed / duration) as f32 * w,
+                    5. + h * (1. - sample.utilization.clamp(0., 100.) as f32 / 100.),
+                )
+            };
+            let first_point = point(first);
+            let last_point = point(self.samples.last().unwrap());
+            let line = Path::new(|p| {
+                p.move_to(first_point);
+                let mut previous = first_point;
+                for sample in self.samples.iter().skip(1) {
+                    let next = point(sample);
+                    p.line_to(Point::new(next.x, previous.y));
+                    p.line_to(next);
+                    previous = next;
+                }
+                p.line_to(Point::new(w + 4., last_point.y));
+            });
+            frame.stroke(
+                &line,
+                Stroke::default()
+                    .with_width(2.)
+                    .with_line_cap(LineCap::Round)
+                    .with_color(PRIMARY),
+            );
+            frame.fill(&Path::circle(Point::new(w + 4., last_point.y), 3.), PRIMARY);
+        }
         vec![frame.into_geometry()]
     }
 }

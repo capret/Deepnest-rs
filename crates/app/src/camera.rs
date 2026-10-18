@@ -4,8 +4,8 @@ use iced::{Point, Size, Vector};
 use nest::Pt;
 
 pub fn transform(stock: &Stock, viewport: Size, zoom: f64, pan: Vector) -> (f32, Point) {
-    let scale = ((viewport.width - 144.0).max(20.0) / stock.width as f32)
-        .min((viewport.height - 192.0).max(20.0) / stock.height as f32)
+    let scale = ((viewport.width - 104.0).max(20.0) / stock.width as f32)
+        .min((viewport.height - 152.0).max(20.0) / stock.height as f32)
         * zoom as f32;
     let origin = Point::new(
         (viewport.width - stock.width as f32 * scale) / 2.0,

@@ -19,6 +19,11 @@ pub enum Icon {
     Minus,
     ChevronDown,
     ChevronRight,
+    ChevronLeft,
+    Check,
+    Search,
+    Chart,
+    Layers,
     Import,
     Export,
     Save,
@@ -27,7 +32,8 @@ pub enum Icon {
     Stop,
     Fit,
     Grid,
-    Sidebar,
+    Window,
+    Restore,
     Trash,
     Help,
     Close,
@@ -109,6 +115,24 @@ impl canvas::Program<Message> for Glyph {
             Icon::Minus => line(&mut f, &[(4., 10.), (16., 10.)]),
             Icon::ChevronDown => line(&mut f, &[(6., 8.), (10., 12.), (14., 8.)]),
             Icon::ChevronRight => line(&mut f, &[(8., 6.), (12., 10.), (8., 14.)]),
+            Icon::ChevronLeft => line(&mut f, &[(12., 6.), (8., 10.), (12., 14.)]),
+            Icon::Check => line(&mut f, &[(4., 10.), (8., 14.), (16., 6.)]),
+            Icon::Search => {
+                f.stroke(&Path::circle(Point::new(8., 8.), 5.), stroke);
+                line(&mut f, &[(12., 12.), (17., 17.)]);
+            }
+            Icon::Chart => {
+                line(&mut f, &[(3., 3.), (3., 17.), (18., 17.)]);
+                line(&mut f, &[(5., 13.), (9., 9.), (12., 11.), (17., 5.)]);
+            }
+            Icon::Layers => {
+                line(
+                    &mut f,
+                    &[(2., 6.), (10., 2.), (18., 6.), (10., 10.), (2., 6.)],
+                );
+                line(&mut f, &[(2., 10.), (10., 14.), (18., 10.)]);
+                line(&mut f, &[(2., 14.), (10., 18.), (18., 14.)]);
+            }
             Icon::Import => {
                 line(&mut f, &[(3., 12.), (3., 17.), (17., 17.), (17., 12.)]);
                 line(&mut f, &[(10., 2.), (10., 12.)]);
@@ -179,9 +203,13 @@ impl canvas::Program<Message> for Glyph {
                     }
                 }
             }
-            Icon::Sidebar => {
-                rect(&mut f, 2., 3., 16., 14.);
-                line(&mut f, &[(8., 3.), (8., 17.)]);
+            Icon::Window => rect(&mut f, 3., 3., 14., 14.),
+            Icon::Restore => {
+                rect(&mut f, 3., 7., 10., 10.);
+                line(
+                    &mut f,
+                    &[(7., 7.), (7., 3.), (17., 3.), (17., 13.), (13., 13.)],
+                );
             }
             Icon::Trash => {
                 line(&mut f, &[(3., 5.), (17., 5.)]);

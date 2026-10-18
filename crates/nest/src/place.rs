@@ -6,7 +6,10 @@
 //! hidden Electron window; here the Iced app calls the native Rust engine.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 
 use serde::Serialize;
 
@@ -29,15 +32,37 @@ use crate::Config;
 pub struct NfpCache {
     outer: Mutex<HashMap<String, Poly>>,
     inner: Mutex<HashMap<String, Vec<Poly>>>,
+    hits: AtomicU64,
+    misses: AtomicU64,
 }
 
 impl NfpCache {
+    /// Query counts for profiling a search; relaxed counters do not serialize workers.
+    pub fn statistics(&self) -> (u64, u64) {
+        (
+            self.hits.load(Ordering::Relaxed),
+            self.misses.load(Ordering::Relaxed),
+        )
+    }
+
+    fn record<T>(&self, value: Option<T>) -> Option<T> {
+        let counter = if value.is_some() {
+            &self.hits
+        } else {
+            &self.misses
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+        value
+    }
+
     fn get_outer(&self, key: &str) -> Option<Poly> {
-        self.outer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(key)
-            .cloned()
+        self.record(
+            self.outer
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(key)
+                .cloned(),
+        )
     }
     fn put_outer(&self, key: String, val: Poly) {
         self.outer
@@ -46,11 +71,13 @@ impl NfpCache {
             .insert(key, val);
     }
     fn get_inner(&self, key: &str) -> Option<Vec<Poly>> {
-        self.inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(key)
-            .cloned()
+        self.record(
+            self.inner
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(key)
+                .cloned(),
+        )
     }
     fn put_inner(&self, key: String, val: Vec<Poly>) {
         self.inner

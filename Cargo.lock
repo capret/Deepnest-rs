@@ -769,6 +769,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "usvg",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

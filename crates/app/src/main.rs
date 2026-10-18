@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod benchmark;
 mod camera;
 mod canvas;
 mod contours;
@@ -12,12 +13,14 @@ mod motion;
 mod nesting;
 mod settings;
 mod settings_view;
+mod studio;
 mod style;
 mod svg_io;
 mod tokens;
 mod tooltip;
 mod view;
 mod widgets;
+mod windowing;
 
 use deepnest_motion::Value;
 use iced::{
@@ -31,15 +34,26 @@ use std::{
 };
 
 pub fn main() -> iced::Result {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().is_some_and(|arg| arg == "--benchmark") {
+        if let Err(error) = benchmark::run(args.next().map(PathBuf::from)) {
+            eprintln!("Benchmark failed: {error}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+    let window_settings = window::Settings {
+        size: Size::new(1360., 860.),
+        min_size: Some(Size::new(500., 660.)),
+        decorations: !cfg!(target_os = "windows"),
+        platform_specific: windowing::platform_settings(),
+        ..Default::default()
+    };
     iced::application(App::new, App::update, App::view)
         .title("Deepnest — Nesting workspace")
         .theme(App::theme)
         .subscription(App::subscription)
-        .window(window::Settings {
-            size: Size::new(1360., 860.),
-            min_size: Some(Size::new(1000., 660.)),
-            ..Default::default()
-        })
+        .window(window_settings)
         .settings(iced::Settings {
             default_text_size: tokens::typography::BODY.into(),
             ..Default::default()
@@ -80,6 +94,10 @@ impl std::fmt::Display for ExportFormat {
 
 #[derive(Debug, Clone)]
 enum Message {
+    Window(WindowAction),
+    RefreshWindow(window::Id),
+    WindowMaximized(bool),
+    NativeTitlebarInstalled(bool),
     Frame(Instant),
     Poll,
     Import,
@@ -96,6 +114,11 @@ enum Message {
     Demo,
     Undo,
     SelectPart(usize),
+    LibraryTab(studio::LibraryTab),
+    InspectorTab(studio::InspectorTab),
+    FilterParts(String),
+    Continuous(bool),
+    Placement(settings::Placement),
     Quantity(usize, i32),
     RemovePart(usize),
     StockInput(StockField, String),
@@ -112,8 +135,6 @@ enum Message {
     Pan(Vector),
     ToggleHelp,
     ToggleGrid,
-    ToggleSidebar,
-    ToggleAdvanced,
     ToggleProjectMenu,
     HintEnter(&'static str, iced::Rectangle),
     HintLeave(&'static str),
@@ -121,6 +142,15 @@ enum Message {
     Unfocused,
     FocusNext(bool),
     Settings(settings::Action),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum WindowAction {
+    Drag,
+    Minimize,
+    Maximize,
+    Close,
+    SystemMenu,
 }
 
 struct Pose {
@@ -146,22 +176,24 @@ struct App {
     sheet: usize,
     worker: Option<nesting::Worker>,
     progress: f64,
+    nest_progress: Value,
+    run: studio::Run,
+    library_tab: studio::LibraryTab,
+    inspector_tab: studio::InspectorTab,
+    part_filter: String,
     pass: u32,
     poses: HashMap<i64, Pose>,
     zoom: Value,
     pan: Vector,
     zoom_anchor: Option<camera::Anchor>,
     epoch: Instant,
-    show_sidebar: bool,
-    show_advanced: bool,
     show_project_menu: bool,
     show_grid: bool,
     show_help: bool,
-    sidebar_progress: Value,
-    options_progress: Value,
     menu_progress: Value,
     tooltip: tooltip::Tooltip,
     window_size: Size,
+    window_maximized: bool,
     status: String,
     error: bool,
     busy_file: bool,
@@ -182,22 +214,24 @@ impl App {
             sheet: 0,
             worker: None,
             progress: 0.0,
+            nest_progress: Value::new(0.72),
+            run: studio::Run::default(),
+            library_tab: studio::LibraryTab::Parts,
+            inspector_tab: studio::InspectorTab::Setup,
+            part_filter: String::new(),
             pass: 0,
             poses: HashMap::new(),
             zoom: Value::new(1.0),
             pan: Vector::ZERO,
             zoom_anchor: None,
             epoch: Instant::now(),
-            show_sidebar: true,
-            show_advanced: false,
             show_project_menu: false,
             show_grid: true,
             show_help: false,
-            sidebar_progress: Value::new(1.),
-            options_progress: Value::new(0.),
             menu_progress: Value::new(0.),
             tooltip: tooltip::Tooltip::default(),
             window_size: Size::new(1360., 860.),
+            window_maximized: false,
             status: "Sample project · Ready to nest".into(),
             error: false,
             busy_file: false,
@@ -209,7 +243,7 @@ impl App {
             settings_dialog: None,
         };
         app.sync_stock();
-        (app, Task::none())
+        (app, window::oldest().and_then(refresh_window))
     }
 
     fn now(&self) -> f64 {
@@ -217,7 +251,7 @@ impl App {
     }
     fn theme(&self) -> Theme {
         Theme::custom(
-            "Deepnest Graphite",
+            "Deepnest Obsidian",
             iced::theme::Palette {
                 background: tokens::color::BACKGROUND,
                 text: tokens::color::FOREGROUND,
@@ -233,7 +267,10 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let mut subscriptions = vec![event::listen_with(|event, status, _| match event {
+        let mut subscriptions = vec![event::listen_with(|event, status, id| match event {
+            Event::Window(
+                window::Event::Opened { .. } | window::Event::Rescaled(_) | window::Event::Focused,
+            ) => Some(Message::RefreshWindow(id)),
             Event::Window(window::Event::FileDropped(path)) => Some(Message::Dropped(path)),
             Event::Window(window::Event::Resized(size)) => Some(Message::Resized(size)),
             Event::Window(window::Event::Unfocused) => Some(Message::Unfocused),
@@ -263,9 +300,8 @@ impl App {
             _ => None,
         })];
         if self.zoom.is_active()
+            || self.nest_progress.is_active()
             || self.poses.values().any(Pose::active)
-            || self.sidebar_progress.is_active()
-            || self.options_progress.is_active()
             || self.menu_progress.is_active()
             || self.tooltip.active()
         {
@@ -324,6 +360,7 @@ impl App {
         self.sheet = 0;
         self.progress = 0.0;
         self.pass = 0;
+        self.run = studio::Run::default();
     }
     fn stop_zoom(&mut self) {
         self.zoom.jump(self.zoom.current);
@@ -375,6 +412,16 @@ impl App {
     }
 
     fn accept_layout(&mut self, layout: Layout) {
+        // A refinement run may find a worse initial result. Keep the incumbent
+        // visible until a verified candidate actually improves the objective.
+        if self
+            .layout
+            .as_ref()
+            .is_some_and(|old| !layout.better_than(old))
+        {
+            return;
+        }
+        self.run.record(&layout, &self.project);
         let now = self.now();
         let origins = canvas::preview_placements(&self.project);
         for part in layout.sheets.iter().flatten() {
@@ -397,6 +444,7 @@ impl App {
     }
 
     fn poll_worker(&mut self) {
+        self.run.tick();
         let events: Vec<_> = self
             .worker
             .as_ref()
@@ -409,7 +457,9 @@ impl App {
                     self.progress = fraction;
                 }
                 nesting::Event::Improved(layout) => self.accept_layout(layout),
+                nesting::Event::Measured(stats) => self.run.stats = stats,
                 nesting::Event::Finished(result) => {
+                    self.run.stop();
                     self.worker = None;
                     match result {
                         Ok(()) => {
@@ -539,6 +589,29 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        if let Message::Window(action) = message {
+            return window::latest().and_then(move |id| match action {
+                WindowAction::Drag => window::drag(id),
+                WindowAction::Minimize => window::minimize(id, true),
+                WindowAction::Maximize => window::toggle_maximize(id),
+                WindowAction::Close => window::close(id),
+                WindowAction::SystemMenu => window::show_system_menu(id),
+            });
+        }
+        match message {
+            Message::RefreshWindow(id) => return refresh_window(id),
+            Message::WindowMaximized(maximized) => {
+                self.window_maximized = maximized;
+                return Task::none();
+            }
+            Message::NativeTitlebarInstalled(installed) => {
+                if !installed {
+                    eprintln!("Could not install the native window frame integration");
+                }
+                return Task::none();
+            }
+            _ => (),
+        }
         let now = self.now();
         if self.settings_dialog.is_some()
             && !matches!(
@@ -584,9 +657,8 @@ impl App {
                         self.zoom_anchor = None;
                     }
                 }
-                self.sidebar_progress.tick(now);
-                self.options_progress.tick(now);
                 self.menu_progress.tick(now);
+                self.nest_progress.tick(now);
                 self.tooltip.tick(now);
                 for pose in self.poses.values_mut() {
                     pose.tick(now);
@@ -627,6 +699,8 @@ impl App {
                             self.invalidate_layout();
                             self.selected = Some(self.project.parts.len());
                             self.project.parts = candidate.parts;
+                            self.part_filter.clear();
+                            self.library_tab = studio::LibraryTab::Parts;
                             self.notice(
                                 format!(
                                     "{}Imported {count} shapes from {} file(s).{}",
@@ -676,6 +750,7 @@ impl App {
                         self.checkpoint();
                         self.invalidate_layout();
                         self.project = project;
+                        self.part_filter.clear();
                         self.selected = if self.project.parts.is_empty() {
                             None
                         } else {
@@ -735,6 +810,10 @@ impl App {
                     return Task::none();
                 }
                 if let Some(layout) = &self.layout {
+                    if !nesting::valid_layout(&self.project, layout) {
+                        self.notice("This layout did not pass validation. Run nesting again before exporting.", true);
+                        return Task::none();
+                    }
                     let (name, filter, extension, contents) = match self.export_format {
                         ExportFormat::Svg => (
                             "cutting-layout.svg",
@@ -780,6 +859,7 @@ impl App {
                 } else {
                     Project::default()
                 };
+                self.part_filter.clear();
                 self.selected = if self.project.parts.is_empty() {
                     None
                 } else {
@@ -805,7 +885,27 @@ impl App {
                 }
             }
             Message::SelectPart(index) if index < self.project.parts.len() => {
-                self.selected = Some(index)
+                self.selected = Some(index);
+                self.library_tab = studio::LibraryTab::Parts;
+                if !self.project.parts[index]
+                    .name
+                    .to_lowercase()
+                    .contains(&self.part_filter.to_lowercase())
+                {
+                    self.part_filter.clear();
+                }
+            }
+            Message::LibraryTab(tab) => self.library_tab = tab,
+            Message::InspectorTab(tab) => self.inspector_tab = tab,
+            Message::FilterParts(value) => self.part_filter = value,
+            Message::Continuous(value) if self.worker.is_none() => {
+                self.checkpoint();
+                self.project.settings.continuous = value;
+            }
+            Message::Placement(value) if self.worker.is_none() => {
+                self.checkpoint();
+                self.project.settings.placement = value;
+                self.invalidate_layout();
             }
             Message::Quantity(index, delta) => {
                 if let Some(part) = self.project.parts.get(index) {
@@ -841,6 +941,7 @@ impl App {
             }
             Message::Attempts(value) if (1..=100_000).contains(&value) => {
                 self.checkpoint();
+                self.run.stop();
                 self.worker = None;
                 self.project.attempts = value;
                 self.project.settings.continuous = false;
@@ -861,6 +962,7 @@ impl App {
                 } else {
                     self.progress = 0.0;
                     self.pass = 1;
+                    self.run.begin(self.layout.as_ref(), &self.project);
                     self.worker = Some(nesting::Worker::start(self.project.clone()));
                     self.notice("Finding an efficient arrangement…", false);
                 }
@@ -873,6 +975,7 @@ impl App {
                 self.show_project_menu = false;
                 self.menu_progress.retarget(0., now, motion::panel());
                 if self.worker.take().is_some() {
+                    self.run.stop();
                     self.notice("Nesting stopped. The best completed layout is kept.", false);
                 }
             }
@@ -912,23 +1015,6 @@ impl App {
             }
             Message::Pan(pan) => self.pan = pan,
             Message::StartPan => self.stop_zoom(),
-            Message::ToggleSidebar => {
-                self.stop_zoom();
-                self.show_sidebar = !self.show_sidebar;
-                self.sidebar_progress.retarget(
-                    if self.show_sidebar { 1. } else { 0. },
-                    now,
-                    motion::panel(),
-                );
-            }
-            Message::ToggleAdvanced => {
-                self.show_advanced = !self.show_advanced;
-                self.options_progress.retarget(
-                    if self.show_advanced { 1. } else { 0. },
-                    now,
-                    motion::panel(),
-                );
-            }
             Message::ToggleProjectMenu => {
                 self.show_project_menu = !self.show_project_menu;
                 self.menu_progress.retarget(
@@ -944,6 +1030,7 @@ impl App {
             Message::Resized(size) => {
                 self.stop_zoom();
                 self.window_size = size;
+                return window::latest().and_then(refresh_window);
             }
             Message::Unfocused => self.stop_zoom(),
             Message::ToggleHelp => self.show_help = !self.show_help,
@@ -957,8 +1044,28 @@ impl App {
             }
             _ => (),
         }
+        // Keep the ring alive through completion and reset, even after the
+        // worker's polling subscription has ended. Unchanged targets must not
+        // restart the spring on each frame.
+        let target = if self.worker.is_some() {
+            self.progress.clamp(0., 1.)
+        } else if self.layout.is_some() {
+            1.
+        } else {
+            0.72
+        };
+        if self.nest_progress.target != target {
+            self.nest_progress.retarget(target, now, motion::progress());
+        }
         Task::none()
     }
+}
+
+fn refresh_window(id: window::Id) -> Task<Message> {
+    Task::batch([
+        window::run(id, windowing::install_native_titlebar).map(Message::NativeTitlebarInstalled),
+        window::is_maximized(id).map(Message::WindowMaximized),
+    ])
 }
 
 async fn import_dialog(settings: settings::Settings) -> Result<Option<ImportBatch>, String> {
@@ -1119,10 +1226,10 @@ mod tests {
         let (mut app, _) = App::new();
         let before = serde_json::to_string(&app.project).unwrap();
         for message in [
-            Message::ToggleSidebar,
             Message::ToggleGrid,
             Message::ToggleHelp,
-            Message::ToggleAdvanced,
+            Message::LibraryTab(studio::LibraryTab::Stock),
+            Message::InspectorTab(studio::InspectorTab::Insights),
         ] {
             let _ = app.update(message);
         }
@@ -1161,6 +1268,61 @@ mod tests {
         let _ = app.update(Message::Pan(pan + Vector::new(25., -10.)));
         assert_eq!(app.pan, pan + Vector::new(25., -10.));
         assert!(!app.dirty);
+    }
+
+    #[test]
+    fn progress_ring_animates_completion_and_reset_after_worker_stops() {
+        let (mut app, _) = App::new();
+        app.nest_progress.jump(0.35);
+        app.layout = Some(sample_layout());
+        app.progress = 1.;
+        let started = Instant::now();
+        let _ = app.update(Message::Poll);
+        assert!(app.worker.is_none());
+        assert_eq!(app.nest_progress.current, 0.35);
+        assert_eq!(app.nest_progress.target, 1.);
+        assert!(app.nest_progress.is_active());
+
+        let mut previous = 0.35;
+        for millis in [16, 48, 96, 160, 300, 1000] {
+            let _ = app.update(Message::Frame(started + Duration::from_millis(millis)));
+            assert!(app.nest_progress.current >= previous);
+            assert!(app.nest_progress.current <= 1.);
+            previous = app.nest_progress.current;
+        }
+        assert_eq!(app.nest_progress.current, 1.);
+        assert!(!app.nest_progress.is_active());
+        let _ = app.update(Message::Poll);
+        assert!(!app.nest_progress.is_active());
+
+        let reset = Instant::now();
+        let _ = app.update(Message::Quantity(0, 1));
+        assert!(app.layout.is_none());
+        assert_eq!(app.nest_progress.target, 0.72);
+        assert_eq!(app.nest_progress.current, 1.);
+        let _ = app.update(Message::Frame(reset + Duration::from_millis(40)));
+        assert!(app.nest_progress.current > 0.72 && app.nest_progress.current < 1.);
+        let _ = app.update(Message::Frame(reset + Duration::from_secs(1)));
+        assert_eq!(app.nest_progress.current, 0.72);
+        assert!(!app.nest_progress.is_active());
+    }
+
+    #[test]
+    fn refinement_keeps_the_incumbent_until_a_better_valid_result_arrives() {
+        let (mut app, _) = App::new();
+        let mut initial = sample_layout();
+        initial.fitness = 10.;
+        app.accept_layout(initial.clone());
+        let mut worse = initial.clone();
+        worse.fitness = 20.;
+        app.accept_layout(worse);
+        assert_eq!(app.layout.as_ref().unwrap().fitness, 10.);
+        assert_eq!(app.run.history.len(), 1);
+        let mut better = initial;
+        better.fitness = 5.;
+        app.accept_layout(better);
+        assert_eq!(app.layout.as_ref().unwrap().fitness, 5.);
+        assert_eq!(app.run.history.len(), 2);
     }
 
     #[test]

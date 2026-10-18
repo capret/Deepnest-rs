@@ -1,5 +1,5 @@
 //! Reusable component variants built exclusively from semantic design tokens.
-use crate::tokens::{color::*, radius};
+use crate::tokens::{color::*, radius, scrollbar};
 use iced::{
     widget::{button, container, pick_list, scrollable, text_input},
     Border, Color, Shadow, Theme, Vector,
@@ -15,18 +15,11 @@ pub fn border(color: Color, radius: f32) -> Border {
         radius: radius.into(),
     }
 }
-pub fn surface(_: &Theme) -> container::Style {
-    container::Style {
-        background: Some(SIDEBAR.into()),
-        text_color: Some(FOREGROUND),
-        ..Default::default()
-    }
-}
 pub fn floating(_: &Theme) -> container::Style {
     container::Style {
         background: Some(POPOVER.into()),
         text_color: Some(FOREGROUND),
-        border: border(BORDER, radius::XL),
+        border: border(BORDER, radius::POPOVER),
         shadow: Shadow {
             color: SHADOW,
             offset: Vector::new(0.0, 4.0),
@@ -35,10 +28,43 @@ pub fn floating(_: &Theme) -> container::Style {
         ..Default::default()
     }
 }
+pub fn tool_group(theme: &Theme) -> container::Style {
+    container::Style {
+        border: border(BORDER, radius::TOOL_GROUP),
+        ..floating(theme)
+    }
+}
+pub fn dialog(theme: &Theme) -> container::Style {
+    container::Style {
+        border: border(BORDER, radius::PANEL),
+        ..floating(theme)
+    }
+}
+pub fn panel(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(SIDEBAR.into()),
+        text_color: Some(FOREGROUND),
+        border: border(alpha(BORDER, 0.65), radius::PANEL),
+        shadow: Shadow {
+            color: alpha(SHADOW, 0.5),
+            offset: Vector::new(0.0, 6.0),
+            blur_radius: 20.0,
+        },
+        ..Default::default()
+    }
+}
+pub fn card(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(POPOVER.into()),
+        text_color: Some(FOREGROUND),
+        border: border(alpha(BORDER, 0.55), radius::CARD),
+        ..Default::default()
+    }
+}
 pub fn inset(_: &Theme) -> container::Style {
     container::Style {
         background: Some(INPUT.into()),
-        border: border(BORDER, radius::MD),
+        border: border(BORDER, radius::CONTROL),
         ..Default::default()
     }
 }
@@ -58,7 +84,7 @@ pub fn button_style(kind: Button) -> impl Fn(&Theme, button::Status) -> button::
             Button::Primary => (PRIMARY, PRIMARY_FOREGROUND, Color::TRANSPARENT),
             Button::Outline => (Color::TRANSPARENT, FOREGROUND, BORDER),
             Button::Ghost => (Color::TRANSPARENT, MUTED_FOREGROUND, Color::TRANSPARENT),
-            Button::Selected => (ACCENT, ACCENT_FOREGROUND, Color::TRANSPARENT),
+            Button::Selected => (ACCENT, ACCENT_FOREGROUND, alpha(PRIMARY, 0.22)),
             Button::Danger => (
                 alpha(DESTRUCTIVE, 0.10),
                 DESTRUCTIVE,
@@ -97,7 +123,19 @@ pub fn button_style(kind: Button) -> impl Fn(&Theme, button::Status) -> button::
             } else {
                 foreground
             },
-            border: border(if disabled { alpha(line, 0.4) } else { line }, radius::MD),
+            border: border(
+                if disabled { alpha(line, 0.4) } else { line },
+                radius::CONTROL,
+            ),
+            shadow: if matches!(kind, Button::Primary) && !disabled {
+                Shadow {
+                    color: alpha(PRIMARY, 0.12),
+                    offset: Vector::new(0.0, 3.0),
+                    blur_radius: 14.0,
+                }
+            } else {
+                Shadow::default()
+            },
             ..Default::default()
         }
     }
@@ -119,7 +157,7 @@ pub fn input(_: &Theme, status: text_input::Status) -> text_input::Style {
             } else {
                 BORDER
             },
-            radius::MD,
+            radius::CONTROL,
         ),
         icon: MUTED_FOREGROUND,
         placeholder: SUBTLE,
@@ -128,10 +166,43 @@ pub fn input(_: &Theme, status: text_input::Status) -> text_input::Style {
     }
 }
 pub fn scroll(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
-    let mut style = scrollable::default(theme, status);
-    style.vertical_rail.background = None;
-    style.vertical_rail.scroller.background = BORDER.into();
-    style
+    let (hover_x, hover_y, drag_x, drag_y) = match status {
+        scrollable::Status::Hovered {
+            is_horizontal_scrollbar_hovered: x,
+            is_vertical_scrollbar_hovered: y,
+            ..
+        } => (x, y, false, false),
+        scrollable::Status::Dragged {
+            is_horizontal_scrollbar_dragged: x,
+            is_vertical_scrollbar_dragged: y,
+            ..
+        } => (false, false, x, y),
+        _ => (false, false, false, false),
+    };
+    let rail = |hovered, dragged| scrollable::Rail {
+        background: None,
+        border: Border::default(),
+        scroller: scrollable::Scroller {
+            background: if dragged {
+                alpha(PRIMARY, 0.8)
+            } else if hovered {
+                alpha(MUTED_FOREGROUND, 0.75)
+            } else {
+                alpha(SUBTLE, 0.45)
+            }
+            .into(),
+            border: Border {
+                radius: radius::circle(scrollbar::THUMB_WIDTH).into(),
+                ..Default::default()
+            },
+        },
+    };
+    scrollable::Style {
+        vertical_rail: rail(hover_y, drag_y),
+        horizontal_rail: rail(hover_x, drag_x),
+        gap: None,
+        ..scrollable::default(theme, status)
+    }
 }
 pub fn select(_: &Theme, status: pick_list::Status) -> pick_list::Style {
     pick_list::Style {
@@ -145,7 +216,7 @@ pub fn select(_: &Theme, status: pick_list::Status) -> pick_list::Style {
             } else {
                 BORDER
             },
-            radius::MD,
+            radius::CONTROL,
         ),
     }
 }

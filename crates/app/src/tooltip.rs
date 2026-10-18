@@ -130,15 +130,15 @@ impl canvas::Program<Message> for Surface<'_> {
         let position = Point::new(t.x.current as f32, t.y.current as f32 + (1. - opacity) * 3.);
         let size = Size::new(t.width.current as f32, 32.);
         frame.fill(
-            &Path::rounded_rectangle(position + Vector::new(0., 3.), size, radius::MD.into()),
+            &Path::rounded_rectangle(position + Vector::new(0., 3.), size, radius::TOOLTIP.into()),
             SHADOW.scale_alpha(opacity),
         );
         frame.fill(
-            &Path::rounded_rectangle(position, size, radius::MD.into()),
+            &Path::rounded_rectangle(position, size, radius::TOOLTIP.into()),
             POPOVER.scale_alpha(opacity),
         );
         frame.stroke(
-            &Path::rounded_rectangle(position, size, radius::MD.into()),
+            &Path::rounded_rectangle(position, size, radius::TOOLTIP.into()),
             canvas::Stroke::default()
                 .with_width(1.)
                 .with_color(BORDER.scale_alpha(opacity)),

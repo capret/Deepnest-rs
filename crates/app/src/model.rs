@@ -236,7 +236,54 @@ pub struct Layout {
     pub pass: u32,
 }
 
+/// Feasibility is checked before ranking. More placed parts always win;
+/// at equal coverage, opening fewer sheets outranks compactness.
+#[derive(Debug, Clone, Copy)]
+pub struct LayoutScore {
+    pub placed: usize,
+    pub sheets: usize,
+    pub fitness: f64,
+}
+impl LayoutScore {
+    pub const WORST: Self = Self {
+        placed: 0,
+        sheets: usize::MAX,
+        fitness: f64::INFINITY,
+    };
+
+    pub fn compare(self, other: Self) -> std::cmp::Ordering {
+        other
+            .placed
+            .cmp(&self.placed)
+            .then(self.sheets.cmp(&other.sheets))
+            .then(self.fitness.total_cmp(&other.fitness))
+    }
+}
+
 impl Layout {
+    pub fn score(&self) -> LayoutScore {
+        LayoutScore {
+            placed: self.placed(),
+            sheets: self.sheets.len(),
+            fitness: self.fitness,
+        }
+    }
+
+    pub fn better_than(&self, other: &Self) -> bool {
+        self.score().compare(other.score()).is_lt()
+    }
+
+    pub fn sheet_utilization(&self, project: &Project, sheet: usize) -> f64 {
+        self.sheets.get(sheet).map_or(0., |parts| {
+            parts
+                .iter()
+                .map(|p| project.parts[p.part].area())
+                .sum::<f64>()
+                / (project.stock.width * project.stock.height)
+                * 100.
+        })
+    }
+
     pub fn placed(&self) -> usize {
         self.sheets.iter().map(Vec::len).sum()
     }
@@ -265,6 +312,18 @@ pub fn transformed(point: Pt, placement: &PlacedPart) -> Pt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn more_parts_then_fewer_sheets_outrank_a_lower_fitness() {
+        let score = |placed, sheets, fitness| LayoutScore {
+            placed,
+            sheets,
+            fitness,
+        };
+        assert!(score(22, 3, 100.).compare(score(21, 1, 1.)).is_lt());
+        assert!(score(22, 2, 100.).compare(score(22, 3, 1.)).is_lt());
+        assert!(score(22, 2, 1.).compare(score(22, 2, 10.)).is_lt());
+        assert!(score(0, 1, 1.).compare(LayoutScore::WORST).is_lt());
+    }
     #[test]
     fn demo_and_project_round_trip_are_valid() {
         let project = Project::demo();

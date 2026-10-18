@@ -1,4 +1,5 @@
 //! Order-preserving crossover, weighted selection, mutation, and elitism.
+use crate::model::LayoutScore;
 use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -10,7 +11,7 @@ pub struct Gene {
 #[derive(Clone)]
 pub struct Candidate {
     pub genes: Vec<Gene>,
-    pub score: Option<(usize, f64)>,
+    pub score: Option<LayoutScore>,
 }
 pub struct Random(u64);
 impl Default for Random {
@@ -45,6 +46,16 @@ impl Random {
         let mut population = vec![Candidate { genes, score: None }];
         while population.len() < size as usize {
             let mut genes = population[0].genes.clone();
+            // Keep the area-sorted seed, but explore genuinely different orders
+            // as well as nearby mutations from the very first generation.
+            if population.len() % 3 == 1 {
+                genes.reverse();
+            } else if population.len() % 3 == 2 {
+                for i in (1..genes.len()).rev() {
+                    let j = self.next(i + 1);
+                    genes.swap(i, j);
+                }
+            }
             self.mutate(&mut genes, mutation, rotations);
             population.push(Candidate { genes, score: None });
         }
@@ -52,9 +63,9 @@ impl Random {
     }
     pub fn generation(&mut self, population: &mut Vec<Candidate>, mutation: u32, rotations: u32) {
         population.sort_by(|a, b| {
-            let a = a.score.unwrap_or((0, f64::INFINITY));
-            let b = b.score.unwrap_or((0, f64::INFINITY));
-            b.0.cmp(&a.0).then(a.1.total_cmp(&b.1))
+            a.score
+                .unwrap_or(LayoutScore::WORST)
+                .compare(b.score.unwrap_or(LayoutScore::WORST))
         });
         let size = population.len();
         let mut next = vec![population[0].clone()];
@@ -110,9 +121,17 @@ mod tests {
             .collect();
         let mut random = Random::default();
         let mut population = random.population(genes.clone(), 20, 50, 7);
-        population[0].score = Some((12, 10.));
+        population[0].score = Some(LayoutScore {
+            placed: 12,
+            sheets: 1,
+            fitness: 10.,
+        });
         for individual in population.iter_mut().skip(1) {
-            individual.score = Some((11, 20.));
+            individual.score = Some(LayoutScore {
+                placed: 11,
+                sheets: 1,
+                fitness: 20.,
+            });
         }
         for _ in 0..10 {
             random.generation(&mut population, 50, 7);

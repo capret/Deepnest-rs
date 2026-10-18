@@ -22,6 +22,15 @@ pub fn camera() -> Settings {
     }
 }
 
+/// Worker updates settle smoothly without bouncing past reported progress.
+pub fn progress() -> Settings {
+    Settings {
+        duration: 0.28,
+        bounce: 0.0,
+        ..layout()
+    }
+}
+
 pub fn panel() -> Settings {
     Settings {
         duration: 0.20,
@@ -59,4 +68,36 @@ fn reduced_motion() -> bool {
             false
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deepnest_motion::Value;
+
+    #[test]
+    fn worker_updates_keep_progress_position_and_velocity_continuous() {
+        let settings = Settings {
+            reduced_motion: false,
+            ..progress()
+        };
+        let mut value = Value::new(0.);
+        value.retarget(0.4, 0., settings);
+        value.tick(0.05);
+        let (position, velocity) = (value.current, value.velocity);
+        assert!(position > 0. && position < 0.4);
+        value.retarget(0.8, 0.05, settings);
+        assert_eq!(value.current, position);
+        assert_eq!(value.velocity, velocity);
+
+        let mut previous = position;
+        for frame in 1..=120 {
+            value.tick(0.05 + frame as f64 / 60.);
+            assert!(value.current >= previous);
+            assert!(value.current <= 0.8);
+            previous = value.current;
+        }
+        assert_eq!(value.current, 0.8);
+        assert!(!value.is_active());
+    }
 }

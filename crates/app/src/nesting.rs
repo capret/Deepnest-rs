@@ -1,5 +1,5 @@
 use crate::genetic::{Gene, Random};
-use crate::model::{transformed, Layout, Part, PlacedPart, Project};
+use crate::model::{transformed, Layout, LayoutScore, Part, PlacedPart, Project};
 use geo::{
     algorithm::buffer::{BufferStyle, LineJoin},
     Area, BooleanOps, Buffer, ConvexHull, Coord, LineString, Polygon,
@@ -18,7 +18,21 @@ use std::{
 pub enum Event {
     Progress { pass: u32, fraction: f64 },
     Improved(Layout),
+    Measured(SearchStats),
     Finished(Result<(), String>),
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct SearchStats {
+    pub evaluations: u32,
+    pub rejected: u32,
+    pub improvements: u32,
+    pub elapsed: f64,
+    pub preparation_seconds: f64,
+    pub validation_seconds: f64,
+    pub first_layout_seconds: Option<f64>,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
 }
 
 pub struct Worker {
@@ -120,11 +134,19 @@ fn search(
     sender: &SyncSender<Event>,
 ) -> Result<(), String> {
     project.validate()?;
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     if project.quantity() == 0 {
         return Err("Import parts or increase a quantity before nesting.".into());
     }
     let start = Instant::now();
     let expanded = expanded_parts(project)?;
+    let mut stats = SearchStats {
+        preparation_seconds: start.elapsed().as_secs_f64(),
+        ..SearchStats::default()
+    };
+    let _ = sender.try_send(Event::Measured(stats.clone()));
     let cache = NfpCache::default();
     let settings = &project.settings;
     let config = Config {
@@ -218,20 +240,27 @@ fn search(
             if cancel.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            for (index, layout) in results {
+            for (index, mut layout) in results {
                 pass += 1;
+                let validation_started = Instant::now();
                 let valid = layout.placed() > 0 && valid_layout(project, &layout);
+                stats.validation_seconds += validation_started.elapsed().as_secs_f64();
+                stats.evaluations = pass;
+                stats.rejected += u32::from(!valid);
                 population[index].score = Some(if valid {
-                    (layout.placed(), layout.fitness)
+                    layout.score()
                 } else {
-                    (0, f64::INFINITY)
+                    LayoutScore::WORST
                 });
-                let improved = valid
-                    && best.as_ref().is_none_or(|old| {
-                        layout.placed() > old.placed()
-                            || (layout.placed() == old.placed() && layout.fitness < old.fitness)
-                    });
+                let improved = valid && best.as_ref().is_none_or(|old| layout.better_than(old));
                 if improved {
+                    // Timestamp the accepted solution, after validation and the
+                    // parallel batch have finished, rather than its evaluation.
+                    layout.elapsed = start.elapsed().as_secs_f64();
+                    stats.improvements += 1;
+                    stats
+                        .first_layout_seconds
+                        .get_or_insert_with(|| start.elapsed().as_secs_f64());
                     best = Some(layout.clone());
                     if sender.send(Event::Improved(layout)).is_err() {
                         return Ok(());
@@ -244,12 +273,18 @@ fn search(
                 };
                 let _ = sender.try_send(Event::Progress { pass, fraction });
             }
+            stats.elapsed = start.elapsed().as_secs_f64();
+            (stats.cache_hits, stats.cache_misses) = cache.statistics();
+            let _ = sender.try_send(Event::Measured(stats.clone()));
         }
         if !settings.continuous && pass >= project.attempts {
             break;
         }
         random.generation(&mut population, settings.mutation, project.rotations);
     }
+    stats.elapsed = start.elapsed().as_secs_f64();
+    (stats.cache_hits, stats.cache_misses) = cache.statistics();
+    let _ = sender.send(Event::Measured(stats));
     if best.is_none() {
         return Err("No valid layout found. Increase the stock size, reduce the gap, or simplify the outlines.".into());
     }
@@ -342,12 +377,24 @@ fn evaluate(
 /// Verify cut polygons before presenting/exporting an engine result. The legacy
 /// engine uses approximate Minkowski geometry; invalid candidates are discarded.
 pub fn valid_layout(project: &Project, layout: &Layout) -> bool {
+    if layout.sheets.len() > project.stock.sheets as usize || !layout.fitness.is_finite() {
+        return false;
+    }
+    let mut instances = std::collections::HashSet::new();
+    let mut quantities = vec![0_u32; project.parts.len()];
     for sheet in &layout.sheets {
         let mut previous: Vec<Polygon<f64>> = vec![];
         for placement in sheet {
             let Some(part) = project.parts.get(placement.part) else {
                 return false;
             };
+            if !instances.insert(placement.instance) || !placement.rotation.is_finite() {
+                return false;
+            }
+            quantities[placement.part] += 1;
+            if quantities[placement.part] > part.quantity {
+                return false;
+            }
             let convert = |points: &[Pt]| {
                 ring(
                     &points
@@ -420,6 +467,7 @@ mod tests {
             {
                 Event::Improved(layout) => best = Some(layout),
                 Event::Progress { pass, .. } => passes = pass,
+                Event::Measured(_) => (),
                 Event::Finished(result) => {
                     result.unwrap();
                     break;
@@ -571,6 +619,78 @@ mod tests {
         let result = nest::nfp::nfp(&expanded[3], &expanded[3]);
         assert_eq!(result.len(), 1);
         assert!(result[0].children.is_empty());
+    }
+
+    #[test]
+    fn measurements_cover_the_finished_budget_and_geometry_cache() {
+        let mut project = square_project();
+        project.attempts = 12;
+        let worker = Worker::start(project.clone());
+        let mut stats = SearchStats::default();
+        let mut previous: Option<Layout> = None;
+        loop {
+            match worker
+                .events
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .unwrap()
+            {
+                Event::Measured(next) => {
+                    assert!(next.evaluations >= stats.evaluations);
+                    stats = next;
+                }
+                Event::Improved(layout) => {
+                    assert!(previous.as_ref().is_none_or(|old| layout.better_than(old)));
+                    assert!(valid_layout(&project, &layout));
+                    previous = Some(layout);
+                }
+                Event::Finished(result) => {
+                    result.unwrap();
+                    break;
+                }
+                _ => (),
+            }
+        }
+        assert_eq!(stats.evaluations, 12);
+        assert!(stats.improvements > 0);
+        assert!(stats.rejected <= stats.evaluations);
+        assert!(stats.first_layout_seconds.unwrap() <= stats.elapsed);
+        assert!(stats.preparation_seconds + stats.validation_seconds <= stats.elapsed);
+        assert!(stats.cache_hits > 0 && stats.cache_misses > 0);
+    }
+
+    #[test]
+    fn validation_rejects_duplicate_instances_excess_copies_and_sheet_counts() {
+        let project = square_project();
+        let part = PlacedPart {
+            part: 0,
+            instance: 0,
+            x: 0.,
+            y: 0.,
+            rotation: 0.,
+        };
+        let second = PlacedPart {
+            instance: 1,
+            x: 30.,
+            ..part.clone()
+        };
+        let mut layout = Layout {
+            sheets: vec![vec![part.clone(), second]],
+            fitness: 1.,
+            elapsed: 0.,
+            pass: 0,
+        };
+        assert!(valid_layout(&project, &layout));
+        layout.sheets[0][1].instance = 0;
+        assert!(!valid_layout(&project, &layout));
+        layout.sheets[0][1].instance = 1;
+        layout.sheets[0].push(PlacedPart {
+            instance: 2,
+            x: 60.,
+            ..part
+        });
+        assert!(!valid_layout(&project, &layout));
+        layout.sheets = vec![vec![]; project.stock.sheets as usize + 1];
+        assert!(!valid_layout(&project, &layout));
     }
     #[test]
     fn intersecting_or_outside_layouts_are_rejected() {
