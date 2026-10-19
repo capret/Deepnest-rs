@@ -10,6 +10,10 @@ workspace. Live measurements include elapsed time, valid candidates, time to the
 first layout, geometry preparation, validation, and NFP cache reuse. Animation is part of the interface
 design: there are no animation controls or animation settings in project files.
 
+The interface supports **English and Simplified Chinese**. Open **Deepnest →
+Language** to switch immediately; the choice is remembered on this device.
+See [localization](docs/localization.md) to add another language.
+
 ## Run
 
 Install a Rust toolchain (1.88 or later), then:
@@ -72,7 +76,7 @@ stays fixed throughout the zoom animation; dragging interrupts it immediately.
 
 ## Nesting settings
 
-Open the settings button in the tool rail or **Optimizer → Advanced settings**.
+Open the settings button at the bottom of the tool rail.
 Five sections restore the original 16 controls: display units, spacing, all 1–32
 rotation counts, placement strategy, curve/endpoint tolerances, rough approximation,
 CPU workers, SVG scale, DXF import/export units, shared cuts, cutting-time weight,

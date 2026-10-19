@@ -65,7 +65,12 @@ impl Tooltip {
         self.opacity.retarget(0., now, motion::tooltip());
     }
     fn show(&mut self, label: &'static str, bounds: Rectangle, window: Size, now: f64) {
-        let width = label.chars().count() as f64 * 6.7 + 24.;
+        // CJK glyphs occupy a full em; ASCII hints retain the compact mono spacing.
+        let width = label
+            .chars()
+            .map(|c| if c.is_ascii() { 6.7 } else { SMALL as f64 })
+            .sum::<f64>()
+            + 24.;
         let x = (bounds.center_x() as f64 - width / 2.)
             .clamp(8., (window.width as f64 - width - 8.).max(8.));
         let y = if bounds.y + bounds.height + 44. < window.height {

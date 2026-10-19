@@ -1,5 +1,5 @@
 //! Project settings, in physical millimeters internally, with editable drafts.
-use crate::model::Project;
+use crate::{i18n::Text, model::Project};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -141,16 +141,37 @@ impl Default for Settings {
     }
 }
 impl Settings {
-    pub fn validate(&self) -> Result<(), String> {
-        for (name, value, min, max) in [
-            ("Curve tolerance", self.curve_tolerance, 0.001, 10.),
-            ("Endpoint tolerance", self.endpoint_tolerance, 0.00001, 5.),
-            ("SVG scale", self.svg_dpi, 1., 9600.),
-            ("Cutting-time weight", self.time_ratio, 0., 1.),
+    pub fn validate(&self) -> Result<(), Text> {
+        for (message, value, min, max) in [
+            (
+                "Curve tolerance must be between {min} and {max} mm.",
+                self.curve_tolerance,
+                0.001,
+                10.,
+            ),
+            (
+                "Endpoint tolerance must be between {min} and {max} mm.",
+                self.endpoint_tolerance,
+                0.00001,
+                5.,
+            ),
+            (
+                "SVG scale must be between {min} and {max} units/inch.",
+                self.svg_dpi,
+                1.,
+                9600.,
+            ),
+            (
+                "Cutting-time weight must be between {min} and {max}.",
+                self.time_ratio,
+                0.,
+                1.,
+            ),
         ] {
             if !value.is_finite() || !(min..=max).contains(&value) {
-                return Err(format!(
-                    "{name} must be between {min} and {max}. Distances are measured in mm."
+                return Err(Text::with(
+                    message,
+                    &[("min", min.to_string()), ("max", max.to_string())],
                 ));
             }
         }
@@ -286,7 +307,7 @@ pub struct Dialog {
     pub inputs: [String; 10],
     pub section: Section,
     pub help: Help,
-    pub error: Option<String>,
+    pub error: Option<Text>,
 }
 impl Dialog {
     pub fn new(project: &Project) -> Self {
@@ -317,7 +338,7 @@ impl Dialog {
             error: None,
         }
     }
-    pub fn change_units(&mut self, units: Units) -> Result<(), String> {
+    pub fn change_units(&mut self, units: Units) -> Result<(), Text> {
         let scale = self.settings.units.factor();
         let distances = [0, 2, 3].map(|i| self.inputs[i].parse::<f64>());
         if distances
@@ -332,7 +353,7 @@ impl Dialog {
         self.settings.units = units;
         Ok(())
     }
-    pub fn apply(&self, project: &mut Project) -> Result<(), String> {
+    pub fn apply(&self, project: &mut Project) -> Result<(), Text> {
         let values: Vec<f64> = self
             .inputs
             .iter()

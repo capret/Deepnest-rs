@@ -7,10 +7,12 @@ mod contours;
 mod cutting;
 mod dxf_io;
 mod genetic;
+mod i18n;
 mod icons;
 mod model;
 mod motion;
 mod nesting;
+mod preferences;
 mod settings;
 mod settings_view;
 mod studio;
@@ -23,6 +25,7 @@ mod widgets;
 mod windowing;
 
 use deepnest_motion::Value;
+use i18n::{Language, Text as LocalizedText};
 use iced::{
     event, keyboard, window, Element, Event, Point, Size, Subscription, Task, Theme, Vector,
 };
@@ -49,8 +52,8 @@ pub fn main() -> iced::Result {
         platform_specific: windowing::platform_settings(),
         ..Default::default()
     };
-    iced::application(App::new, App::update, App::view)
-        .title("Deepnest — Nesting workspace")
+    iced::application(App::boot, App::update, App::view)
+        .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription)
         .window(window_settings)
@@ -101,14 +104,14 @@ enum Message {
     Frame(Instant),
     Poll,
     Import,
-    Imported(Result<Option<ImportBatch>, String>),
+    Imported(Result<Option<ImportBatch>, LocalizedText>),
     Dropped(PathBuf),
     Open,
-    Opened(Result<Option<Project>, String>),
+    Opened(Result<Option<Project>, LocalizedText>),
     Save,
-    Saved(u64, Result<Option<String>, String>),
+    Saved(u64, Result<Option<String>, LocalizedText>),
     Export,
-    Exported(Result<Option<String>, String>),
+    Exported(Result<Option<String>, LocalizedText>),
     ExportFormat(ExportFormat),
     New,
     Demo,
@@ -136,6 +139,7 @@ enum Message {
     ToggleHelp,
     ToggleGrid,
     ToggleProjectMenu,
+    Language(Language),
     HintEnter(&'static str, iced::Rectangle),
     HintLeave(&'static str),
     Resized(Size),
@@ -170,6 +174,8 @@ impl Pose {
 }
 
 struct App {
+    language: Language,
+    preferences_path: Option<PathBuf>,
     project: Project,
     layout: Option<Layout>,
     selected: Option<usize>,
@@ -194,7 +200,7 @@ struct App {
     tooltip: tooltip::Tooltip,
     window_size: Size,
     window_maximized: bool,
-    status: String,
+    status: LocalizedText,
     error: bool,
     busy_file: bool,
     dirty: bool,
@@ -206,8 +212,19 @@ struct App {
 }
 
 impl App {
+    fn boot() -> (Self, Task<Message>) {
+        let (mut app, task) = Self::new();
+        app.preferences_path = preferences::path();
+        if let Some(path) = &app.preferences_path {
+            app.language = preferences::Preferences::load(path).language;
+        }
+        (app, task)
+    }
+
     fn new() -> (Self, Task<Message>) {
         let mut app = Self {
+            language: Language::default(),
+            preferences_path: None,
             project: Project::demo(),
             layout: None,
             selected: Some(0),
@@ -248,6 +265,9 @@ impl App {
 
     fn now(&self) -> f64 {
         self.epoch.elapsed().as_secs_f64()
+    }
+    fn title(&self) -> String {
+        self.language.tr("Deepnest — Nesting workspace").into()
     }
     fn theme(&self) -> Theme {
         Theme::custom(
@@ -340,7 +360,7 @@ impl App {
                 })
             })
     }
-    fn notice(&mut self, message: impl Into<String>, error: bool) {
+    fn notice(&mut self, message: impl Into<LocalizedText>, error: bool) {
         self.status = message.into();
         self.error = error;
     }
@@ -468,13 +488,18 @@ impl App {
                                 let missing =
                                     self.project.quantity().saturating_sub(layout.placed());
                                 let message = if missing > 0 {
-                                    format!("{} parts placed · {missing} unplaced. Add sheets or enlarge the stock.",layout.placed())
+                                    LocalizedText::with("{placed} parts placed · {missing} unplaced. Add sheets or enlarge the stock.", &[("placed", layout.placed().to_string()), ("missing", missing.to_string())])
                                 } else {
-                                    format!(
-                                        "All {} parts placed across {} sheet{}. Ready to export.",
-                                        layout.placed(),
-                                        layout.sheets.len(),
-                                        if layout.sheets.len() == 1 { "" } else { "s" }
+                                    LocalizedText::with(
+                                        if layout.sheets.len() == 1 {
+                                            "All {count} parts placed on one sheet. Ready to export."
+                                        } else {
+                                            "All {count} parts placed across {sheets} sheets. Ready to export."
+                                        },
+                                        &[
+                                            ("count", layout.placed().to_string()),
+                                            ("sheets", layout.sheets.len().to_string()),
+                                        ],
                                     )
                                 };
                                 self.notice(message, missing > 0);
@@ -647,6 +672,21 @@ impl App {
             self.menu_progress.retarget(0., now, motion::panel());
         }
         match message {
+            Message::Language(language) => {
+                self.language = language;
+                self.tooltip = tooltip::Tooltip::default();
+                if let Some(path) = &self.preferences_path {
+                    if let Err(error) = (preferences::Preferences { language }).save(path) {
+                        self.notice(
+                            LocalizedText::with(
+                                "Language changed, but the preference could not be saved: {error}",
+                                &[("error", error.to_string())],
+                            ),
+                            true,
+                        );
+                    }
+                }
+            }
             Message::Settings(action) => self.settings_action(action),
             Message::Frame(at) => {
                 let now = at.saturating_duration_since(self.epoch).as_secs_f64();
@@ -668,7 +708,7 @@ impl App {
             Message::Import if !self.busy_file => {
                 self.busy_file = true;
                 return Task::perform(
-                    import_dialog(self.project.settings.clone()),
+                    import_dialog(self.project.settings.clone(), self.language),
                     Message::Imported,
                 );
             }
@@ -702,22 +742,13 @@ impl App {
                             self.part_filter.clear();
                             self.library_tab = studio::LibraryTab::Parts;
                             self.notice(
-                                format!(
-                                    "{}Imported {count} shapes from {} file(s).{}",
-                                    if batch.assumed_mm > 0 {
-                                        "Unitless DXF: using mm. "
+                                LocalizedText::with(
+                                    if batch.skipped == 0 && batch.assumed_mm == 0 {
+                                        "Imported {count} shapes from {files} files."
                                     } else {
-                                        ""
+                                        "Imported {count} shapes from {files} files. Skipped: {skipped}. Unitless DXF files read as mm: {assumed}."
                                     },
-                                    batch.files,
-                                    if batch.skipped > 0 {
-                                        format!(
-                                            " Skipped {} open contours or unsupported objects.",
-                                            batch.skipped
-                                        )
-                                    } else {
-                                        String::new()
-                                    }
+                                    &[("count", count.to_string()), ("files", batch.files.to_string()), ("skipped", batch.skipped.to_string()), ("assumed", batch.assumed_mm.to_string())],
                                 ),
                                 false,
                             );
@@ -729,10 +760,12 @@ impl App {
             }
             Message::Open if !self.busy_file => {
                 self.busy_file = true;
+                let language = self.language;
                 return Task::perform(
-                    async {
+                    async move {
                         let Some(file) = rfd::AsyncFileDialog::new()
-                            .add_filter("Deepnest project", &["deepnest"])
+                            .set_title(language.tr("Open project…"))
+                            .add_filter(language.tr("Deepnest project"), &["deepnest"])
                             .pick_file()
                             .await
                         else {
@@ -788,6 +821,7 @@ impl App {
                         "Deepnest project",
                         "deepnest",
                         contents,
+                        self.language,
                     ),
                     move |result| Message::Saved(revision, result),
                 );
@@ -799,7 +833,10 @@ impl App {
                         if revision == self.revision {
                             self.dirty = false;
                         }
-                        self.notice(format!("Project saved to {path}"), false);
+                        self.notice(
+                            LocalizedText::with("Project saved to {path}", &[("path", path)]),
+                            false,
+                        );
                     }
                     Ok(None) => (),
                     Err(error) => self.notice(error, true),
@@ -833,7 +870,7 @@ impl App {
                     };
                     self.busy_file = true;
                     return Task::perform(
-                        save_dialog(name, filter, extension, contents),
+                        save_dialog(name, filter, extension, contents, self.language),
                         Message::Exported,
                     );
                 } else {
@@ -843,9 +880,10 @@ impl App {
             Message::Exported(result) => {
                 self.busy_file = false;
                 match result {
-                    Ok(Some(path)) => {
-                        self.notice(format!("Cutting layout exported to {path}"), false)
-                    }
+                    Ok(Some(path)) => self.notice(
+                        LocalizedText::with("Cutting layout exported to {path}", &[("path", path)]),
+                        false,
+                    ),
                     Ok(None) => (),
                     Err(error) => self.notice(error, true),
                 }
@@ -1068,9 +1106,13 @@ fn refresh_window(id: window::Id) -> Task<Message> {
     ])
 }
 
-async fn import_dialog(settings: settings::Settings) -> Result<Option<ImportBatch>, String> {
+async fn import_dialog(
+    settings: settings::Settings,
+    language: Language,
+) -> Result<Option<ImportBatch>, LocalizedText> {
     let Some(files) = rfd::AsyncFileDialog::new()
-        .add_filter("Vector outlines", &["svg", "dxf"])
+        .set_title(language.tr("Import parts"))
+        .add_filter(language.tr("Vector outlines"), &["svg", "dxf"])
         .add_filter("SVG", &["svg"])
         .add_filter("DXF", &["dxf"])
         .pick_files()
@@ -1088,7 +1130,7 @@ async fn import_dialog(settings: settings::Settings) -> Result<Option<ImportBatc
 async fn read_vectors(
     paths: Vec<PathBuf>,
     settings: settings::Settings,
-) -> Result<Option<ImportBatch>, String> {
+) -> Result<Option<ImportBatch>, LocalizedText> {
     tokio::task::spawn_blocking(move || {
         let mut batch = ImportBatch {
             parts: vec![],
@@ -1097,7 +1139,15 @@ async fn read_vectors(
             assumed_mm: 0,
         };
         for path in paths {
-            let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let bytes = std::fs::read(&path).map_err(|e| {
+                LocalizedText::with(
+                    "Cannot read {path}: {error}",
+                    &[
+                        ("path", path.display().to_string()),
+                        ("error", e.to_string()),
+                    ],
+                )
+            })?;
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("part");
             let extension = path
                 .extension()
@@ -1106,14 +1156,24 @@ async fn read_vectors(
                 .to_ascii_lowercase();
             let imported = match extension.as_str() {
                 "svg" => svg_io::parse_with(
-                    std::str::from_utf8(&bytes).map_err(|e| format!("Invalid SVG text: {e}"))?,
+                    std::str::from_utf8(&bytes).map_err(|e| {
+                        LocalizedText::with(
+                            "Invalid SVG text: {error}",
+                            &[("error", e.to_string())],
+                        )
+                    })?,
                     name,
                     &settings,
                 ),
                 "dxf" => dxf_io::parse_with(&bytes, name, &settings),
                 _ => return Err("Import a local SVG or DXF file.".into()),
             }
-            .map_err(|e| format!("{name}: {e}"))?;
+            .map_err(|e| {
+                LocalizedText::with(
+                    "Cannot import {name}: {error}",
+                    &[("name", name.to_owned()), ("error", e)],
+                )
+            })?;
             batch.assumed_mm += usize::from(imported.assumed_mm);
             batch.parts.extend(imported.parts);
             batch.skipped += imported.skipped;
@@ -1121,20 +1181,22 @@ async fn read_vectors(
         Ok(Some(batch))
     })
     .await
-    .map_err(|e| format!("Import failed: {e}"))?
+    .map_err(|e| LocalizedText::with("Import failed: {error}", &[("error", e.to_string())]))?
 }
 
-async fn read_project(path: PathBuf) -> Result<Project, String> {
+async fn read_project(path: PathBuf) -> Result<Project, LocalizedText> {
     tokio::task::spawn_blocking(move || {
-        let source =
-            std::fs::read_to_string(path).map_err(|e| format!("Cannot open project: {e}"))?;
-        let project: Project =
-            serde_json::from_str(&source).map_err(|e| format!("Invalid project file: {e}"))?;
+        let source = std::fs::read_to_string(path).map_err(|e| {
+            LocalizedText::with("Cannot open project: {error}", &[("error", e.to_string())])
+        })?;
+        let project: Project = serde_json::from_str(&source).map_err(|e| {
+            LocalizedText::with("Invalid project file: {error}", &[("error", e.to_string())])
+        })?;
         project.validate()?;
         Ok(project)
     })
     .await
-    .map_err(|e| format!("Cannot open project: {e}"))?
+    .map_err(|e| LocalizedText::with("Cannot open project: {error}", &[("error", e.to_string())]))?
 }
 
 async fn save_dialog(
@@ -1142,18 +1204,24 @@ async fn save_dialog(
     filter: &'static str,
     extension: &'static str,
     contents: String,
-) -> Result<Option<String>, String> {
+    language: Language,
+) -> Result<Option<String>, LocalizedText> {
     let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title(language.tr(if extension == "deepnest" {
+            "Save project…"
+        } else {
+            "Export layout"
+        }))
         .set_file_name(name)
-        .add_filter(filter, &[extension])
+        .add_filter(language.tr(filter), &[extension])
         .save_file()
         .await
     else {
         return Ok(None);
     };
-    file.write(contents.as_bytes())
-        .await
-        .map_err(|e| format!("Cannot save file: {e}"))?;
+    file.write(contents.as_bytes()).await.map_err(|e| {
+        LocalizedText::with("Cannot save file: {error}", &[("error", e.to_string())])
+    })?;
     Ok(Some(file.path().display().to_string()))
 }
 
@@ -1219,6 +1287,61 @@ mod tests {
             Ok(Some("sample.deepnest".into())),
         ));
         assert!(!app.dirty);
+    }
+
+    #[test]
+    fn language_switch_preserves_edits_layout_and_undo_history() {
+        let (mut app, _) = App::new();
+        let _ = app.update(Message::Quantity(0, 1));
+        app.project.parts[0].name = "零件 {count}.svg".into();
+        app.layout = Some(sample_layout());
+        let _ = app.update(Message::StockInput(StockField::Width, "unfinished".into()));
+        let before = serde_json::to_string(&app.project).unwrap();
+        let inputs = app.stock_inputs.clone();
+        let revision = app.revision;
+        let history = app.history.len();
+        app.notice("Finding an efficient arrangement…", false);
+        let _ = app.update(Message::Language(Language::SimplifiedChinese));
+        assert_eq!(app.language, Language::SimplifiedChinese);
+        assert_eq!(app.status.render(app.language), "正在寻找更高效的排列…");
+        assert_eq!(serde_json::to_string(&app.project).unwrap(), before);
+        assert_eq!(app.stock_inputs, inputs);
+        assert_eq!(app.revision, revision);
+        assert_eq!(app.history.len(), history);
+        assert!(app.layout.is_some());
+        assert!(app.dirty);
+        let _ = app.update(Message::Language(Language::English));
+        assert_eq!(
+            app.status.render(app.language),
+            "Finding an efficient arrangement…"
+        );
+        let _ = app.update(Message::Undo);
+        assert_eq!(app.project.parts[0].quantity, 4);
+    }
+
+    #[test]
+    fn validation_errors_keep_values_separate_from_translated_messages() {
+        let mut project = Project::demo();
+        project.settings.curve_tolerance = 12.;
+        let error = project.validate().unwrap_err();
+        assert_eq!(
+            error.render(Language::English),
+            "Curve tolerance must be between 0.001 and 10 mm."
+        );
+        assert_eq!(
+            error.render(Language::SimplifiedChinese),
+            "曲线容差必须在 0.001 到 10 毫米之间。"
+        );
+        project.settings.curve_tolerance = 0.1;
+        project.parts[0].name = "用户零件 {min}".into();
+        project.parts[0].quantity = 201;
+        assert_eq!(
+            project
+                .validate()
+                .unwrap_err()
+                .render(Language::SimplifiedChinese),
+            "用户零件 {min}的面积或数量无效（数量上限为 200）。"
+        );
     }
 
     #[test]

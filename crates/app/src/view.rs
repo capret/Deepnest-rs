@@ -1,5 +1,6 @@
 use crate::{
     canvas::{NestRing, SearchTrend, SheetPreview, Thumbnail, Workspace},
+    i18n::{trf, Language},
     icons::{icon, Icon},
     studio::{self, InspectorTab, LibraryTab},
     style::{self, Button},
@@ -16,6 +17,7 @@ use iced::{
 };
 
 fn action<'a>(
+    l: Language,
     label: &'a str,
     glyph: Icon,
     message: Option<Message>,
@@ -31,7 +33,7 @@ fn action<'a>(
         }
     };
     button(
-        row![icon(glyph, color), text(label).size(BODY).font(BOLD)]
+        row![icon(glyph, color), text(l.tr(label)).size(BODY).font(BOLD)]
             .spacing(gap::XS)
             .align_y(Vertical::Center),
     )
@@ -41,6 +43,7 @@ fn action<'a>(
     .style(style::button_style(kind))
 }
 fn icon_button(
+    l: Language,
     glyph: Icon,
     hint: &'static str,
     message: Option<Message>,
@@ -66,7 +69,7 @@ fn icon_button(
         } else {
             Button::Ghost
         })),
-        hint,
+        l.tr(hint),
     )
 }
 fn divider() -> Element<'static, Message> {
@@ -106,8 +109,8 @@ fn single_line(value: &str, length: usize) -> String {
     }
 }
 
-fn tab<'a>(label: &'a str, selected: bool, message: Message) -> Element<'a, Message> {
-    button(container(text(label).size(SMALL).font(BOLD)).center_x(Fill))
+fn tab<'a>(l: Language, label: &'a str, selected: bool, message: Message) -> Element<'a, Message> {
+    button(container(text(l.tr(label)).size(SMALL).font(BOLD)).center_x(Fill))
         .padding([gap::XS, gap::SM])
         .width(Fill)
         .on_press(message)
@@ -119,13 +122,17 @@ fn tab<'a>(label: &'a str, selected: bool, message: Message) -> Element<'a, Mess
         .into()
 }
 
-fn section_title(label: &str) -> Element<'_, Message> {
-    text(label).size(CAPTION).font(MONO).color(SUBTLE).into()
+fn section_title(l: Language, label: &str) -> Element<'_, Message> {
+    text(l.tr(label))
+        .size(CAPTION)
+        .font(MONO)
+        .color(SUBTLE)
+        .into()
 }
 
-fn detail_row<'a>(label: &'a str, value: String) -> Element<'a, Message> {
+fn detail_row<'a>(l: Language, label: &'a str, value: String) -> Element<'a, Message> {
     row![
-        text(label).size(SMALL).color(MUTED_FOREGROUND),
+        text(l.tr(label)).size(SMALL).color(MUTED_FOREGROUND),
         space::horizontal(),
         text(value).size(SMALL).color(FOREGROUND)
     ]
@@ -135,14 +142,17 @@ fn detail_row<'a>(label: &'a str, value: String) -> Element<'a, Message> {
 }
 
 fn library_tabs(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     container(
         row![
             tab(
+                l,
                 "Parts",
                 app.library_tab == LibraryTab::Parts,
                 Message::LibraryTab(LibraryTab::Parts)
             ),
             tab(
+                l,
                 "Stock",
                 app.library_tab == LibraryTab::Stock,
                 Message::LibraryTab(LibraryTab::Stock)
@@ -160,9 +170,10 @@ fn assets_visible(app: &App) -> bool {
 }
 
 pub fn workspace(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let menu = button(
         row![
-            text("Deepnest").font(BOLD).size(18),
+            text(l.tr("Deepnest")).font(BOLD).size(18),
             icon(Icon::ChevronDown, SUBTLE),
         ]
         .spacing(gap::SM)
@@ -196,7 +207,7 @@ pub fn workspace(app: &App) -> Element<'_, Message> {
     tools = tools.push(space::horizontal());
     if app.window_size.width >= 1120. {
         tools = tools.push(
-            text("NESTING STUDIO")
+            text(l.tr("NESTING STUDIO"))
                 .size(CAPTION)
                 .font(MONO)
                 .color(SUBTLE),
@@ -206,6 +217,7 @@ pub fn workspace(app: &App) -> Element<'_, Message> {
     if !assets_visible(app) {
         tools = if app.window_size.width >= 800. {
             tools.push(action(
+                l,
                 "Import parts",
                 Icon::Import,
                 (!app.busy_file).then_some(Message::Import),
@@ -213,6 +225,7 @@ pub fn workspace(app: &App) -> Element<'_, Message> {
             ))
         } else {
             tools.push(icon_button(
+                l,
                 Icon::Import,
                 "Import SVG or DXF · Ctrl I",
                 (!app.busy_file).then_some(Message::Import),
@@ -223,6 +236,7 @@ pub fn workspace(app: &App) -> Element<'_, Message> {
     if app.window_size.width < 800. {
         let running = app.worker.is_some();
         tools = tools.push(action(
+            l,
             if running { "Stop" } else { "Nest" },
             if running { Icon::Stop } else { Icon::Play },
             if running {
@@ -281,7 +295,7 @@ pub fn workspace(app: &App) -> Element<'_, Message> {
                 project_menu(app),
                 app.menu_progress.current,
                 false,
-                164.
+                212.
             )))
             .padding(iced::Padding {
                 top: gap::XXS,
@@ -306,6 +320,7 @@ pub fn workspace(app: &App) -> Element<'_, Message> {
             .on_press(Message::Settings(crate::settings::Action::Close)),
             crate::settings_view::dialog(
                 dialog,
+                l,
                 iced::Size::new(
                     app.window_size.width,
                     app.window_size.height - layout::TOOLBAR
@@ -396,12 +411,13 @@ fn window_controls(app: &App) -> Element<'static, Message> {
 }
 
 fn project_menu(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let available = !app.busy_file;
     let item = |label, glyph, shortcut, message| {
         button(
             row![
                 icon(glyph, MUTED_FOREGROUND),
-                text(label).size(BODY),
+                text(l.tr(label)).size(BODY),
                 space::horizontal(),
                 text(shortcut).size(CAPTION).font(MONO).color(SUBTLE),
             ]
@@ -421,19 +437,33 @@ fn project_menu(app: &App) -> Element<'_, Message> {
             item("Save project…", Icon::Save, "Ctrl S", Message::Save),
             divider(),
             item("Load sample", Icon::Logo, "", Message::Demo),
+            divider(),
+            row![
+                text(l.tr("Language")).size(SMALL).color(MUTED_FOREGROUND),
+                space::horizontal(),
+                pick_list(Language::ALL, Some(l), Message::Language)
+                    .text_size(SMALL)
+                    .padding([7, 8])
+                    .width(132)
+                    .style(style::select),
+            ]
+            .spacing(gap::SM)
+            .align_y(Vertical::Center),
         ]
         .spacing(gap::XXS),
     )
-    .width(248)
+    .width(272)
     .padding(gap::XS)
     .style(style::floating)
     .into()
 }
 
 fn navigation(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     container(
         column![
             icon_button(
+                l,
                 Icon::Undo,
                 "Undo · Ctrl Z",
                 (!app.history.is_empty()).then_some(Message::Undo),
@@ -441,6 +471,7 @@ fn navigation(app: &App) -> Element<'_, Message> {
             ),
             space::vertical(),
             icon_button(
+                l,
                 Icon::Settings,
                 "Project settings · Ctrl ,",
                 Some(Message::Settings(crate::settings::Action::Open)),
@@ -458,12 +489,13 @@ fn navigation(app: &App) -> Element<'_, Message> {
 }
 
 fn library(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     if app.library_tab == LibraryTab::Stock {
         return stock_library(app);
     }
     let header = column![
         row![
-            text("Job assets").size(HEADING).font(BOLD),
+            text(l.tr("Job assets")).size(HEADING).font(BOLD),
             space::horizontal(),
             badge(format!("{:02}", app.project.parts.len())),
         ]
@@ -471,7 +503,7 @@ fn library(app: &App) -> Element<'_, Message> {
         library_tabs(app),
         row![
             icon(Icon::Search, SUBTLE),
-            text_input("Find a part…", &app.part_filter)
+            text_input(l.tr("Find a part…"), &app.part_filter)
                 .on_input(Message::FilterParts)
                 .size(SMALL)
                 .padding(gap::XS)
@@ -480,6 +512,7 @@ fn library(app: &App) -> Element<'_, Message> {
         .spacing(gap::XS)
         .align_y(Vertical::Center),
         action(
+            l,
             "Import SVG / DXF",
             Icon::Plus,
             (!app.busy_file).then_some(Message::Import),
@@ -487,9 +520,12 @@ fn library(app: &App) -> Element<'_, Message> {
         )
         .width(Fill),
         row![
-            text("PROJECT PARTS").size(CAPTION).font(MONO).color(SUBTLE),
+            text(l.tr("PROJECT PARTS"))
+                .size(CAPTION)
+                .font(MONO)
+                .color(SUBTLE),
             space::horizontal(),
-            text(format!("{} copies", app.project.quantity()))
+            text(trf!(l, "{count} copies", count = app.project.quantity()))
                 .size(CAPTION)
                 .color(MUTED_FOREGROUND),
         ],
@@ -550,15 +586,16 @@ fn library(app: &App) -> Element<'_, Message> {
         );
     }
     if visible_parts == 0 && !app.project.parts.is_empty() {
-        parts = parts
-            .push(container(text("No matching parts").size(SMALL).color(SUBTLE)).padding(gap::SM));
+        parts = parts.push(
+            container(text(l.tr("No matching parts")).size(SMALL).color(SUBTLE)).padding(gap::SM),
+        );
     }
     if app.project.parts.is_empty() {
         parts = parts.push(
             container(
                 column![
-                    text("No parts yet").size(BODY).color(FOREGROUND),
-                    text("Imported shapes will appear here.")
+                    text(l.tr("No parts yet")).size(BODY).color(FOREGROUND),
+                    text(l.tr("Imported shapes will appear here."))
                         .size(SMALL)
                         .color(MUTED_FOREGROUND),
                 ]
@@ -577,7 +614,7 @@ fn library(app: &App) -> Element<'_, Message> {
                 detail,
                 row![
                     icon(Icon::File, SUBTLE),
-                    text("Original contours preserved")
+                    text(l.tr("Original contours preserved"))
                         .size(CAPTION)
                         .color(SUBTLE),
                 ]
@@ -594,11 +631,12 @@ fn library(app: &App) -> Element<'_, Message> {
 }
 
 fn stock_library(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let stock_card = container(
         column![
             row![
                 icon(Icon::Layers, PRIMARY),
-                text("Sheet preview").size(BODY).font(BOLD),
+                text(l.tr("Sheet preview")).size(BODY).font(BOLD),
             ]
             .spacing(gap::XS)
             .align_y(Vertical::Center),
@@ -617,7 +655,7 @@ fn stock_library(app: &App) -> Element<'_, Message> {
         container(
             column![
                 row![
-                    text("Job assets").size(HEADING).font(BOLD),
+                    text(l.tr("Job assets")).size(HEADING).font(BOLD),
                     space::horizontal(),
                     badge("01".into())
                 ]
@@ -628,7 +666,7 @@ fn stock_library(app: &App) -> Element<'_, Message> {
                     column![
                         stock_card,
                         stock(app),
-                        text("Sheet size and spacing apply to every sheet in this job.")
+                        text(l.tr("Sheet size and spacing apply to every sheet in this job."))
                             .size(SMALL)
                             .color(SUBTLE)
                     ]
@@ -645,6 +683,7 @@ fn stock_library(app: &App) -> Element<'_, Message> {
 }
 
 fn inspector(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let running = app.worker.is_some();
     let ready = app.layout.is_some();
     let control = button(
@@ -660,7 +699,7 @@ fn inspector(app: &App) -> Element<'_, Message> {
                 )
                 .width(20)
                 .height(20),
-                text(if running { "Stop" } else { "Nest" })
+                text(l.tr(if running { "Stop" } else { "Nest" }))
                     .size(SMALL)
                     .font(BOLD),
             ]
@@ -705,29 +744,46 @@ fn inspector(app: &App) -> Element<'_, Message> {
         "Ready to optimize"
     };
     let run_label = if running && app.project.settings.continuous {
-        format!("Evaluation {}", app.pass)
+        trf!(l, "Evaluation {count}", count = app.pass)
     } else if running {
-        format!("{} / {} evaluations", app.pass, app.project.attempts)
+        trf!(
+            l,
+            "{count} / {total} evaluations",
+            count = app.pass,
+            total = app.project.attempts
+        )
     } else if app.run.stats.evaluations > 0 {
-        format!("{} evaluated", app.run.stats.evaluations)
+        trf!(l, "{count} evaluated", count = app.run.stats.evaluations)
     } else {
-        format!("{} parts in this job", app.project.quantity())
+        trf!(
+            l,
+            "{count} parts in this job",
+            count = app.project.quantity()
+        )
     };
     let header = column![
-        text("Optimizer").size(18).font(BOLD),
+        text(l.tr("Optimizer")).size(18).font(BOLD),
         row![
-            badge(format!("CPU · {} workers", app.project.settings.workers)),
+            badge(trf!(
+                l,
+                "CPU · {count} workers",
+                count = app.project.settings.workers
+            )),
             space::horizontal(),
-            text("LOCAL ENGINE").size(CAPTION).font(MONO).color(SUBTLE)
+            text(l.tr("LOCAL ENGINE"))
+                .size(CAPTION)
+                .font(MONO)
+                .color(SUBTLE)
         ]
         .align_y(Vertical::Center),
         row![
             dial,
             column![
-                text(phase)
-                    .size(BODY)
-                    .font(BOLD)
-                    .color(if running { PRIMARY } else { FOREGROUND }),
+                text(l.tr(phase)).size(BODY).font(BOLD).color(if running {
+                    PRIMARY
+                } else {
+                    FOREGROUND
+                }),
                 text(studio::duration(app.run.stats.elapsed))
                     .font(MONO)
                     .size(24)
@@ -744,7 +800,7 @@ fn inspector(app: &App) -> Element<'_, Message> {
     let metric = |label: &'static str, value: String| {
         column![
             text(value).size(HEADING).font(MONO).color(FOREGROUND),
-            text(label).size(CAPTION).color(MUTED_FOREGROUND),
+            text(l.tr(label)).size(CAPTION).color(MUTED_FOREGROUND),
         ]
         .spacing(4)
         .width(Fill)
@@ -759,7 +815,7 @@ fn inspector(app: &App) -> Element<'_, Message> {
         column![
             row![
                 column![
-                    text("MATERIAL USE")
+                    text(l.tr("MATERIAL USE"))
                         .size(CAPTION)
                         .font(MONO)
                         .color(MUTED_FOREGROUND),
@@ -805,11 +861,13 @@ fn inspector(app: &App) -> Element<'_, Message> {
     let tabs = container(
         row![
             tab(
+                l,
                 "Setup",
                 app.inspector_tab == InspectorTab::Setup,
                 Message::InspectorTab(InspectorTab::Setup)
             ),
             tab(
+                l,
                 "Run insights",
                 app.inspector_tab == InspectorTab::Insights,
                 Message::InspectorTab(InspectorTab::Insights)
@@ -831,16 +889,20 @@ fn inspector(app: &App) -> Element<'_, Message> {
     .spacing(gap::MD);
     let exportable = ready && !running && !app.busy_file && !app.stock_pending();
     let (label, tint) = if app.stock_pending() {
-        ("Stock changes pending".into(), WARNING)
+        (l.tr("Stock changes pending").into(), WARNING)
     } else if ready && placed < app.project.quantity() {
         (
-            format!("{} parts unplaced", app.project.quantity() - placed),
+            trf!(
+                l,
+                "{count} parts unplaced",
+                count = app.project.quantity() - placed
+            ),
             WARNING,
         )
     } else if ready {
-        ("Contours verified".into(), SUCCESS)
+        (l.tr("Contours verified").into(), SUCCESS)
     } else {
-        ("Run nesting to create a layout".into(), SUBTLE)
+        (l.tr("Run nesting to create a layout").into(), SUBTLE)
     };
     let export = container(
         column![
@@ -852,6 +914,7 @@ fn inspector(app: &App) -> Element<'_, Message> {
             .align_y(Vertical::Center),
             row![
                 action(
+                    l,
                     "Export layout",
                     Icon::Export,
                     exportable.then_some(Message::Export),
@@ -898,12 +961,13 @@ fn inspector(app: &App) -> Element<'_, Message> {
 }
 
 fn optimizer_setup(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let running = app.worker.is_some();
     let mut presets = iced::widget::Row::new().spacing(gap::XXS);
     for (label, attempts) in [("Quick", 16), ("Balanced", 64), ("Deep", 256)] {
         let selected = !app.project.settings.continuous && app.project.attempts == attempts;
         presets = presets.push(
-            button(container(text(label).size(SMALL)).center_x(Fill))
+            button(container(text(l.tr(label)).size(SMALL)).center_x(Fill))
                 .width(Fill)
                 .padding([gap::XS, 4.])
                 .on_press_maybe((!running).then_some(Message::Attempts(attempts)))
@@ -915,16 +979,16 @@ fn optimizer_setup(app: &App) -> Element<'_, Message> {
         );
     }
     let strategy: Element<'_, Message> = if running {
-        badge(app.project.settings.placement.to_string())
+        badge(l.label(app.project.settings.placement).to_string())
     } else {
         pick_list(
-            [
+            l.labels(&[
                 crate::settings::Placement::BoundingBox,
                 crate::settings::Placement::Gravity,
                 crate::settings::Placement::Compact,
-            ],
-            Some(app.project.settings.placement),
-            Message::Placement,
+            ]),
+            Some(l.label(app.project.settings.placement)),
+            |v| Message::Placement(v.value),
         )
         .text_size(SMALL)
         .padding([7, 8])
@@ -947,11 +1011,11 @@ fn optimizer_setup(app: &App) -> Element<'_, Message> {
         .into()
     };
     let mut content = column![
-        section_title("SEARCH BUDGET"),
+        section_title(l, "SEARCH BUDGET"),
         presets,
         button(
             row![
-                text("Search until stopped").size(SMALL),
+                text(l.tr("Search until stopped")).size(SMALL),
                 space::horizontal(),
                 icon(
                     if app.project.settings.continuous {
@@ -977,22 +1041,28 @@ fn optimizer_setup(app: &App) -> Element<'_, Message> {
             Button::Ghost
         })),
         text(if app.project.settings.continuous {
-            "Refines the best layout until you stop.".into()
+            l.tr("Refines the best layout until you stop.").into()
         } else {
-            format!("Up to {} candidate layouts per run.", app.project.attempts)
+            trf!(
+                l,
+                "Up to {count} candidate layouts per run.",
+                count = app.project.attempts
+            )
         })
         .size(CAPTION)
         .color(SUBTLE),
         divider(),
-        section_title("PLACEMENT"),
+        section_title(l, "PLACEMENT"),
         row![
-            text("Strategy").size(SMALL).color(MUTED_FOREGROUND),
+            text(l.tr("Strategy")).size(SMALL).color(MUTED_FOREGROUND),
             space::horizontal(),
             strategy
         ]
         .align_y(Vertical::Center),
         row![
-            text("Rotation steps").size(SMALL).color(MUTED_FOREGROUND),
+            text(l.tr("Rotation steps"))
+                .size(SMALL)
+                .color(MUTED_FOREGROUND),
             space::horizontal(),
             rotations
         ]
@@ -1006,6 +1076,7 @@ fn optimizer_setup(app: &App) -> Element<'_, Message> {
 }
 
 fn run_insights(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let stats = &app.run.stats;
     let queries = stats.cache_hits + stats.cache_misses;
     let reuse = if queries == 0 {
@@ -1014,7 +1085,7 @@ fn run_insights(app: &App) -> Element<'_, Message> {
         format!("{:.1}%", stats.cache_hits as f64 / queries as f64 * 100.)
     };
     let mut content = column![
-        section_title("MATERIAL USE OVER TIME"),
+        section_title(l, "MATERIAL USE OVER TIME"),
         container(
             column![
                 canvas(SearchTrend {
@@ -1024,7 +1095,7 @@ fn run_insights(app: &App) -> Element<'_, Message> {
                 .width(Fill)
                 .height(92),
                 row![
-                    text("0s").size(CAPTION).font(MONO).color(SUBTLE),
+                    text(l.tr("0s")).size(CAPTION).font(MONO).color(SUBTLE),
                     space::horizontal(),
                     text(studio::duration(stats.elapsed))
                         .size(CAPTION)
@@ -1040,34 +1111,38 @@ fn run_insights(app: &App) -> Element<'_, Message> {
     .spacing(gap::SM);
     if app.run.history.is_empty() {
         content = content.push(
-            text("Start a run to see verified improvements.")
+            text(l.tr("Start a run to see verified improvements."))
                 .size(CAPTION)
                 .color(SUBTLE),
         );
     }
-    content.push(section_title("RUN PERFORMANCE")).push(container(column![
-        detail_row("Evaluations", stats.evaluations.to_string()),
-        detail_row("Valid candidates", stats.evaluations.saturating_sub(stats.rejected).to_string()),
-        detail_row("Best updates", stats.improvements.to_string()),
+    content.push(section_title(l, "RUN PERFORMANCE")).push(container(column![
+        detail_row(l, "Evaluations", stats.evaluations.to_string()),
+        detail_row(l, "Valid candidates", stats.evaluations.saturating_sub(stats.rejected).to_string()),
+        detail_row(l, "Best updates", stats.improvements.to_string()),
         divider(),
-        detail_row("First valid layout", stats.first_layout_seconds.map_or("—".into(), studio::duration)),
-        detail_row("Geometry preparation", studio::duration(stats.preparation_seconds)),
-        detail_row("Validation", studio::duration(stats.validation_seconds)),
-        detail_row("Geometry cache reuse", reuse),
+        detail_row(l, "First valid layout", stats.first_layout_seconds.map_or("—".into(), studio::duration)),
+        detail_row(l, "Geometry preparation", studio::duration(stats.preparation_seconds)),
+        detail_row(l, "Validation", studio::duration(stats.validation_seconds)),
+        detail_row(l, "Geometry cache reuse", reuse),
     ].spacing(gap::SM)).padding(gap::SM).style(style::card))
-    .push(text("Every accepted layout is checked against the original contours and clearance rules.").size(SMALL).color(MUTED_FOREGROUND)).into()
+    .push(text(l.tr("Every accepted layout is checked against the original contours and clearance rules.")).size(SMALL).color(MUTED_FOREGROUND)).into()
 }
 
 fn selection(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let content: Element<'_, Message> = if let Some((index, part)) = app
         .selected
         .and_then(|index| app.project.parts.get(index).map(|part| (index, part)))
     {
         column![
             row![
-                text("Selected part").size(SMALL).color(MUTED_FOREGROUND),
+                text(l.tr("Selected part"))
+                    .size(SMALL)
+                    .color(MUTED_FOREGROUND),
                 space::horizontal(),
                 icon_button(
+                    l,
                     Icon::Trash,
                     "Remove selected part",
                     Some(Message::RemovePart(index)),
@@ -1077,11 +1152,12 @@ fn selection(app: &App) -> Element<'_, Message> {
             .align_y(Vertical::Center),
             text(single_line(&part.name, 30)).size(BODY).font(BOLD),
             row![
-                text("Quantity").size(SMALL).color(MUTED_FOREGROUND),
+                text(l.tr("Quantity")).size(SMALL).color(MUTED_FOREGROUND),
                 space::horizontal(),
                 container(
                     row![
                         icon_button(
+                            l,
                             Icon::Minus,
                             "Decrease quantity",
                             (part.quantity > 0).then_some(Message::Quantity(index, -1)),
@@ -1093,6 +1169,7 @@ fn selection(app: &App) -> Element<'_, Message> {
                             .width(30)
                             .align_x(text::Alignment::Center),
                         icon_button(
+                            l,
                             Icon::Plus,
                             "Increase quantity",
                             (part.quantity < 200).then_some(Message::Quantity(index, 1)),
@@ -1109,8 +1186,8 @@ fn selection(app: &App) -> Element<'_, Message> {
         .into()
     } else {
         column![
-            text("Selection").size(SMALL).color(MUTED_FOREGROUND),
-            text("Select a part to change its quantity.")
+            text(l.tr("Selection")).size(SMALL).color(MUTED_FOREGROUND),
+            text(l.tr("Select a part to change its quantity."))
                 .size(BODY)
                 .color(SUBTLE),
         ]
@@ -1124,8 +1201,9 @@ fn selection(app: &App) -> Element<'_, Message> {
 }
 
 fn stock(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let apply: Element<'_, Message> = if app.stock_pending() {
-        button(text("Apply").size(SMALL).font(BOLD))
+        button(text(l.tr("Apply")).size(SMALL).font(BOLD))
             .padding([gap::XXS, gap::XS])
             .style(style::button_style(Button::Selected))
             .on_press(Message::CommitStock)
@@ -1139,7 +1217,7 @@ fn stock(app: &App) -> Element<'_, Message> {
     };
     let content = column![
         row![
-            text("Stock sheet").size(BODY).font(BOLD),
+            text(l.tr("Stock sheet")).size(BODY).font(BOLD),
             space::horizontal(),
             apply
         ]
@@ -1161,8 +1239,9 @@ fn stock(app: &App) -> Element<'_, Message> {
 }
 
 fn stock_input<'a>(app: &'a App, field: StockField, label: &'a str) -> Element<'a, Message> {
+    let l = app.language;
     column![
-        text(label).size(CAPTION).color(MUTED_FOREGROUND),
+        text(l.tr(label)).size(CAPTION).color(MUTED_FOREGROUND),
         text_input("0", &app.stock_inputs[field as usize])
             .on_input_maybe(
                 app.settings_dialog
@@ -1181,14 +1260,19 @@ fn stock_input<'a>(app: &'a App, field: StockField, label: &'a str) -> Element<'
 }
 
 fn drawing(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let drawing = canvas(Workspace(app)).width(Fill).height(Fill);
     let context: Element<'_, Message> = if let Some(layout) = &app.layout {
         row![
             icon(Icon::File, MUTED_FOREGROUND),
-            text(format!("Sheet {:02}", app.sheet + 1))
-                .size(BODY)
-                .color(FOREGROUND),
-            text(format!("of {}", layout.sheets.len()))
+            text(trf!(
+                l,
+                "Sheet {number}",
+                number = format!("{:02}", app.sheet + 1)
+            ))
+            .size(BODY)
+            .color(FOREGROUND),
+            text(trf!(l, "of {count}", count = layout.sheets.len()))
                 .size(SMALL)
                 .color(MUTED_FOREGROUND),
         ]
@@ -1198,7 +1282,7 @@ fn drawing(app: &App) -> Element<'_, Message> {
     } else {
         row![
             icon(Icon::File, MUTED_FOREGROUND),
-            text("Source preview").size(BODY).color(FOREGROUND)
+            text(l.tr("Source preview")).size(BODY).color(FOREGROUND)
         ]
         .spacing(gap::SM)
         .align_y(Vertical::Center)
@@ -1206,15 +1290,15 @@ fn drawing(app: &App) -> Element<'_, Message> {
     };
     let top = column![
         row![
-            section_title("LAYOUT WORKSPACE"),
+            section_title(l, "LAYOUT WORKSPACE"),
             space::horizontal(),
-            text(if app.stock_pending() {
+            text(l.tr(if app.stock_pending() {
                 "CHANGES PENDING"
             } else if app.layout.is_some() {
                 "VERIFIED LAYOUT"
             } else {
                 "SOURCE GEOMETRY"
-            })
+            }))
             .size(CAPTION)
             .font(MONO)
             .color(if app.stock_pending() {
@@ -1243,22 +1327,25 @@ fn drawing(app: &App) -> Element<'_, Message> {
     ]
     .spacing(gap::XS);
     let summary = if let Some(result) = &app.layout {
-        format!(
-            "{} / {} placed    ·    {:.1}% material used",
-            result.placed(),
-            app.project.quantity(),
-            result.utilization(&app.project)
+        trf!(
+            l,
+            "{placed} / {total} placed · {used}% material used",
+            placed = result.placed(),
+            total = app.project.quantity(),
+            used = format!("{:.1}", result.utilization(&app.project))
         )
     } else {
-        format!(
-            "{} shapes    ·    {} copies",
-            app.project.parts.len(),
-            app.project.quantity()
+        trf!(
+            l,
+            "{shapes} shapes · {copies} copies",
+            shapes = app.project.parts.len(),
+            copies = app.project.quantity()
         )
     };
     let zoom = widgets::tool_group(
         row![
             icon_button(
+                l,
                 Icon::Minus,
                 "Zoom out",
                 Some(Message::Zoom(1. / 1.2)),
@@ -1270,9 +1357,9 @@ fn drawing(app: &App) -> Element<'_, Message> {
                 .width(43)
                 .align_x(text::Alignment::Center)
                 .color(FOREGROUND),
-            icon_button(Icon::Plus, "Zoom in", Some(Message::Zoom(1.2)), false),
+            icon_button(l, Icon::Plus, "Zoom in", Some(Message::Zoom(1.2)), false),
             container(vertical_divider()).height(16),
-            icon_button(Icon::Fit, "Fit sheet to view", Some(Message::Fit), false),
+            icon_button(l, Icon::Fit, "Fit sheet to view", Some(Message::Fit), false),
         ]
         .spacing(gap::XXS)
         .align_y(Vertical::Center),
@@ -1283,12 +1370,14 @@ fn drawing(app: &App) -> Element<'_, Message> {
         widgets::tool_group(
             row![
                 icon_button(
+                    l,
                     Icon::Grid,
                     "Toggle canvas grid",
                     Some(Message::ToggleGrid),
                     app.show_grid
                 ),
                 icon_button(
+                    l,
                     Icon::Help,
                     "Canvas controls and shortcuts",
                     Some(Message::ToggleHelp),
@@ -1315,11 +1404,11 @@ fn drawing(app: &App) -> Element<'_, Message> {
     if app.project.parts.is_empty() {
         let empty = column![
             icon(Icon::Import, SHEET_FOREGROUND).width(28).height(28),
-            text("Build your first cutting job")
+            text(l.tr("Build your first cutting job"))
                 .size(TITLE)
                 .font(BOLD)
                 .color(SHEET_FOREGROUND),
-            text("Drop SVG or DXF files here to begin.")
+            text(l.tr("Drop SVG or DXF files here to begin."))
                 .size(BODY)
                 .color(CUT_LINE),
         ]
@@ -1329,10 +1418,10 @@ fn drawing(app: &App) -> Element<'_, Message> {
     }
     if app.show_help {
         let help = container(column![
-            row![text("Canvas controls").font(BOLD).size(BODY),space::horizontal(),icon_button(Icon::Close,"Close help",Some(Message::ToggleHelp),false)].align_y(Vertical::Center),
-            text("Scroll to zoom · Drag empty space to pan\nClick a part to select it").size(SMALL).color(MUTED_FOREGROUND),
+            row![text(l.tr("Canvas controls")).font(BOLD).size(BODY),space::horizontal(),icon_button(l, Icon::Close,"Close help",Some(Message::ToggleHelp),false)].align_y(Vertical::Center),
+            text(l.tr("Scroll to zoom · Drag empty space to pan\nClick a part to select it")).size(SMALL).color(MUTED_FOREGROUND),
             divider(),
-            text("⌘/Ctrl + I    Import parts\n⌘/Ctrl + O    Open project\n⌘/Ctrl + S    Save project\n⌘/Ctrl + E    Export layout\n⌘/Ctrl + Z    Undo\n⌘/Ctrl + Enter    Nest parts\nEsc    Stop nesting / close menus").size(SMALL).font(MONO).color(MUTED_FOREGROUND),
+            text(l.tr("⌘/Ctrl + I    Import parts\n⌘/Ctrl + O    Open project\n⌘/Ctrl + S    Save project\n⌘/Ctrl + E    Export layout\n⌘/Ctrl + Z    Undo\n⌘/Ctrl + Enter    Nest parts\nEsc    Stop nesting / close menus")).size(SMALL).font(MONO).color(MUTED_FOREGROUND),
         ].spacing(gap::SM)).padding(gap::MD).width(320).style(style::floating);
         layers = layers.push(
             container(column![
@@ -1358,15 +1447,16 @@ fn drawing(app: &App) -> Element<'_, Message> {
 }
 
 fn sheet_tray(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let Some(result) = &app.layout else {
         return container(
             row![
                 icon(Icon::Layers, SUBTLE),
                 column![
-                    text("Your sheets, at a glance")
+                    text(l.tr("Your sheets, at a glance"))
                         .size(SMALL)
                         .color(MUTED_FOREGROUND),
-                    text("Run nesting to compare material use across sheets.")
+                    text(l.tr("Run nesting to compare material use across sheets."))
                         .size(CAPTION)
                         .color(SUBTLE),
                 ]
@@ -1418,18 +1508,23 @@ fn sheet_tray(app: &App) -> Element<'_, Message> {
                     .width(74)
                     .height(48),
                     column![
-                        text(format!("Sheet {:02}", index + 1))
-                            .size(SMALL)
-                            .font(BOLD)
-                            .color(if selected {
-                                ACCENT_FOREGROUND
-                            } else {
-                                FOREGROUND
-                            }),
-                        text(format!(
-                            "{:.1}% · {} parts",
-                            result.sheet_utilization(&app.project, index),
-                            result.sheets[index].len()
+                        text(trf!(
+                            l,
+                            "Sheet {number}",
+                            number = format!("{:02}", index + 1)
+                        ))
+                        .size(SMALL)
+                        .font(BOLD)
+                        .color(if selected {
+                            ACCENT_FOREGROUND
+                        } else {
+                            FOREGROUND
+                        }),
+                        text(trf!(
+                            l,
+                            "{used}% · {count} parts",
+                            used = format!("{:.1}", result.sheet_utilization(&app.project, index)),
+                            count = result.sheets[index].len()
                         ))
                         .size(CAPTION)
                         .color(MUTED_FOREGROUND),
@@ -1462,12 +1557,13 @@ fn sheet_tray(app: &App) -> Element<'_, Message> {
             .padding([8, 8])
             .width(70)
             .style(style::select),
-            "Jump to sheet",
+            l.tr("Jump to sheet"),
         ));
     }
     container(
         navigation
             .push(icon_button(
+                l,
                 Icon::ChevronLeft,
                 "Previous sheet",
                 (app.sheet > 0).then(|| Message::SelectSheet(app.sheet - 1)),
@@ -1475,6 +1571,7 @@ fn sheet_tray(app: &App) -> Element<'_, Message> {
             ))
             .push(cards.width(Fill))
             .push(icon_button(
+                l,
                 Icon::ChevronRight,
                 "Next sheet",
                 (app.sheet + 1 < result.sheets.len())
@@ -1488,37 +1585,48 @@ fn sheet_tray(app: &App) -> Element<'_, Message> {
 }
 
 fn status(app: &App) -> Element<'_, Message> {
+    let l = app.language;
     let color = if app.error {
         DESTRUCTIVE
     } else {
         MUTED_FOREGROUND
     };
     let activity = if app.worker.is_some() && app.project.settings.continuous {
-        format!("Evaluation {} · searching until stopped", app.pass)
+        trf!(
+            l,
+            "Evaluation {count} · searching until stopped",
+            count = app.pass
+        )
     } else if app.worker.is_some() {
-        format!(
-            "Evaluation {} / {} · {:.0}%",
-            app.pass,
-            app.project.attempts,
-            app.progress * 100.
+        trf!(
+            l,
+            "Evaluation {count} / {total} · {percent}%",
+            count = app.pass,
+            total = app.project.attempts,
+            percent = format!("{:.0}", app.progress * 100.)
         )
     } else {
         app.layout
             .as_ref()
-            .map_or("Local workspace".into(), |layout| {
-                format!("Best evaluation {} · {:.1}s", layout.pass, layout.elapsed)
+            .map_or(l.tr("Local workspace").into(), |layout| {
+                trf!(
+                    l,
+                    "Best evaluation {count} · {seconds}s",
+                    count = layout.pass,
+                    seconds = format!("{:.1}", layout.elapsed)
+                )
             })
     };
     container(
         row![
-            text("•").size(BODY).color(if app.error {
+            text(l.tr("•")).size(BODY).color(if app.error {
                 DESTRUCTIVE
             } else if app.worker.is_some() {
                 PRIMARY
             } else {
                 SUCCESS
             }),
-            text(single_line(&app.status, 100))
+            text(single_line(&app.status.render(l), 100))
                 .size(CAPTION)
                 .color(color)
                 .width(Fill),

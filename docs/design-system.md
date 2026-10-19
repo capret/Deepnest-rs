@@ -92,6 +92,16 @@ draws contextual examples using native Canvas geometry. Explanations change on
 hover, editing, or the help button; they remain readable alongside the controls.
 These product settings are separate from visual tokens and code-defined motion.
 
+## Language and text
+
+The project menu owns the device-level language selector. Use the catalogs in
+`crates/app/locales` and `i18n.rs` for all interface copy, including tooltips,
+dropdown labels, drawing annotations, and status messages. Preserve user names
+and serialized settings. Iced's automatic shaping provides system font fallback
+for Chinese; tooltip measurements reserve a full em for non-ASCII glyphs. Check
+both languages when sizing controls or wrapping guidance. See
+[localization](localization.md) for translation and validation conventions.
+
 ## Motion is a design decision
 
 Edit `crates/app/src/motion.rs`, not the project model. Layout changes use the

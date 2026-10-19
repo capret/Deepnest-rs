@@ -1,3 +1,4 @@
+use crate::i18n::Text;
 use nest::{
     geom::{get_polygon_bounds, polygon_area, Bounds},
     Pt,
@@ -84,7 +85,7 @@ impl Project {
         self.parts.iter().map(|part| part.quantity as usize).sum()
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), Text> {
         if self.version != 1 {
             return Err("This project was saved by an unsupported version of Deepnest.".into());
         }
@@ -108,9 +109,9 @@ impl Project {
         }
         for part in &self.parts {
             if part.quantity > 200 || !valid(part.area(), 0.000001, 1e12) {
-                return Err(format!(
-                    "{} has an invalid area or quantity (maximum 200).",
-                    part.name
+                return Err(Text::with(
+                    "{name} has an invalid area or quantity (maximum 200).",
+                    &[("name", part.name.clone())],
                 ));
             }
             for ring in std::iter::once(&part.points).chain(&part.holes) {
@@ -119,9 +120,9 @@ impl Project {
                         .iter()
                         .any(|p| !valid(p.x, -1e6, 1e6) || !valid(p.y, -1e6, 1e6))
                 {
-                    return Err(format!(
-                        "{} contains invalid polygon coordinates.",
-                        part.name
+                    return Err(Text::with(
+                        "{name} contains invalid polygon coordinates.",
+                        &[("name", part.name.clone())],
                     ));
                 }
             }

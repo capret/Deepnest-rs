@@ -1,5 +1,6 @@
 //! A quiet settings surface with contextual, illustrated explanations.
 use crate::{
+    i18n::{trf, Language},
     icons::{icon, Icon},
     settings::{Action, CadUnit, Dialog, Help, Number, Placement, Section, Units},
     style::{self, Button},
@@ -20,16 +21,17 @@ use iced::{
 fn message(action: Action) -> Message {
     Message::Settings(action)
 }
-fn label<'a>(title: &'a str, hint: &'a str) -> Element<'a, Message> {
+fn label<'a>(l: Language, title: &'a str, hint: &'a str) -> Element<'a, Message> {
     column![
-        text(title).size(BODY).font(BOLD),
-        text(hint).size(SMALL).color(MUTED_FOREGROUND)
+        text(l.tr(title)).size(BODY).font(BOLD),
+        text(l.tr(hint)).size(SMALL).color(MUTED_FOREGROUND)
     ]
     .spacing(5)
     .width(Fill)
     .into()
 }
 fn setting<'a>(
+    l: Language,
     title: &'a str,
     hint: &'a str,
     control: Element<'a, Message>,
@@ -38,7 +40,7 @@ fn setting<'a>(
     mouse_area(
         container(
             row![
-                label(title, hint),
+                label(l, title, hint),
                 control,
                 button(icon(Icon::Help, MUTED_FOREGROUND))
                     .padding(6)
@@ -54,6 +56,7 @@ fn setting<'a>(
     .into()
 }
 fn numeric<'a>(
+    l: Language,
     d: &'a Dialog,
     field: Number,
     title: &'a str,
@@ -69,13 +72,14 @@ fn numeric<'a>(
             .font(MONO)
             .padding(9)
             .style(style::input),
-        text(suffix).size(SMALL).color(SUBTLE).width(34)
+        text(l.tr(suffix)).size(SMALL).color(SUBTLE).width(34)
     ]
     .spacing(7)
     .align_y(Vertical::Center);
-    setting(title, hint, input.into(), field.help())
+    setting(l, title, hint, input.into(), field.help())
 }
 fn toggle<'a>(
+    l: Language,
     title: &'a str,
     hint: &'a str,
     value: bool,
@@ -83,6 +87,7 @@ fn toggle<'a>(
     help: Help,
 ) -> Element<'a, Message> {
     setting(
+        l,
         title,
         hint,
         checkbox(value)
@@ -100,11 +105,11 @@ fn line() -> Element<'static, Message> {
         .into()
 }
 
-pub fn dialog(d: &Dialog, window: Size) -> Element<'_, Message> {
+pub fn dialog(d: &Dialog, l: Language, window: Size) -> Element<'_, Message> {
     let mut tabs = row![].spacing(gap::XXS);
     for section in Section::ALL {
         tabs = tabs.push(
-            button(text(section.label()).size(BODY))
+            button(text(l.tr(section.label())).size(BODY))
                 .padding([9, 14])
                 .on_press(message(Action::Section(section)))
                 .style(style::button_style(if d.section == section {
@@ -117,54 +122,57 @@ pub fn dialog(d: &Dialog, window: Size) -> Element<'_, Message> {
     let unit = d.settings.units.symbol();
     let fields: Column<'_, Message> = match d.section {
         Section::Nesting => column![
-            setting("Display units", "Dimensions and rulers", pick_list([Units::Millimeters, Units::Inches], Some(d.settings.units), |v| message(Action::Units(v)))
+            setting(l, "Display units", "Dimensions and rulers", pick_list(l.labels(&[Units::Millimeters, Units::Inches]), Some(l.label(d.settings.units)), |v| message(Action::Units(v.value)))
                 .width(166).text_size(BODY).padding(9).style(style::select).into(), Help::Units),
-            line(), numeric(d, Number::Gap, "Part gap", "Minimum clearance between cut outlines", unit),
-            line(), numeric(d, Number::Rotations, "Allowed rotations", "1–32 evenly spaced orientations", "steps"),
-            line(), setting("Placement strategy", "Choose the shape of the remaining stock", pick_list([Placement::Gravity, Placement::BoundingBox, Placement::Compact], Some(d.settings.placement), |v| message(Action::Placement(v)))
+            line(), numeric(l, d, Number::Gap, "Part gap", "Minimum clearance between cut outlines", unit),
+            line(), numeric(l, d, Number::Rotations, "Allowed rotations", "1–32 evenly spaced orientations", "steps"),
+            line(), setting(l, "Placement strategy", "Choose the shape of the remaining stock", pick_list(l.labels(&[Placement::Gravity, Placement::BoundingBox, Placement::Compact]), Some(l.label(d.settings.placement)), |v| message(Action::Placement(v.value)))
                 .width(166).text_size(BODY).padding(9).style(style::select).into(), Help::Placement),
         ],
         Section::Geometry => column![
-            numeric(d, Number::Curves, "Curve tolerance", "Maximum curve approximation error", unit), line(),
-            numeric(d, Number::Endpoints, "Endpoint tolerance", "Join nearby open path endpoints", unit), line(),
-            toggle("Use rough approximation", "Nest a simpler, enclosing shape", d.settings.simplify, Action::Simplify, Help::Simplify),
-            container(text("Curve and endpoint tolerances apply on import. Reimport a file to rebuild its outlines with new tolerances.").size(SMALL).color(MUTED_FOREGROUND))
+            numeric(l, d, Number::Curves, "Curve tolerance", "Maximum curve approximation error", unit), line(),
+            numeric(l, d, Number::Endpoints, "Endpoint tolerance", "Join nearby open path endpoints", unit), line(),
+            toggle(l, "Use rough approximation", "Nest a simpler, enclosing shape", d.settings.simplify, Action::Simplify, Help::Simplify),
+            container(text(l.tr("Curve and endpoint tolerances apply on import. Reimport a file to rebuild its outlines with new tolerances.")).size(SMALL).color(MUTED_FOREGROUND))
                 .padding(gap::SM).style(style::inset),
         ],
         Section::Files => column![
-            numeric(d, Number::Svg, "SVG fallback scale", "For files without physical dimensions", "u/in"), line(),
-            setting("DXF import units", "Read declared units or override them", pick_list([CadUnit::Auto, CadUnit::Points, CadUnit::Picas, CadUnit::Inches, CadUnit::Millimeters, CadUnit::Centimeters], Some(d.settings.dxf_import), |v| message(Action::DxfImport(v)))
+            numeric(l, d, Number::Svg, "SVG fallback scale", "For files without physical dimensions", "u/in"), line(),
+            setting(l, "DXF import units", "Read declared units or override them", pick_list(l.labels(&[CadUnit::Auto, CadUnit::Points, CadUnit::Picas, CadUnit::Inches, CadUnit::Millimeters, CadUnit::Centimeters]), Some(l.label(d.settings.dxf_import)), |v| message(Action::DxfImport(v.value)))
                 .width(174).text_size(BODY).padding(9).style(style::select).into(), Help::DxfImport), line(),
-            setting("DXF export units", "Coordinate units written into the file", pick_list([CadUnit::Points, CadUnit::Picas, CadUnit::Inches, CadUnit::Millimeters, CadUnit::Centimeters], Some(d.settings.dxf_export), |v| message(Action::DxfExport(v)))
+            setting(l, "DXF export units", "Coordinate units written into the file", pick_list(l.labels(&[CadUnit::Points, CadUnit::Picas, CadUnit::Inches, CadUnit::Millimeters, CadUnit::Centimeters]), Some(l.label(d.settings.dxf_export)), |v| message(Action::DxfExport(v.value)))
                 .width(174).text_size(BODY).padding(9).style(style::select).into(), Help::DxfExport),
         ],
         Section::Cutting => column![
-            toggle("Merge shared lines", "Cut touching edges only once", d.settings.merge_lines, Action::Merge, Help::Merge), line(),
-            numeric(d, Number::Time, "Cutting-time weight", "0 = material only · 1 = strongest cut preference", "0–1"),
-            container(text(if d.inputs[Number::Gap as usize].parse::<f64>().unwrap_or(1.) > 0. {
+            toggle(l, "Merge shared lines", "Cut touching edges only once", d.settings.merge_lines, Action::Merge, Help::Merge), line(),
+            numeric(l, d, Number::Time, "Cutting-time weight", "0 = material only · 1 = strongest cut preference", "0–1"),
+            container(text(l.tr(if d.inputs[Number::Gap as usize].parse::<f64>().unwrap_or(1.) > 0. {
                 "Your part gap is above zero. Set it to 0 in Layout to enable shared cuts. Spaced outlines stay separate."
-            } else { "Shared-line export writes a cut network. Turn it off when a downstream tool requires separate closed part contours." })
+            } else { "Shared-line export writes a cut network. Turn it off when a downstream tool requires separate closed part contours." }))
                 .size(SMALL).color(MUTED_FOREGROUND)).padding(gap::SM).style(style::inset),
         ],
         Section::Search => {
             let fields = column![
-                numeric(d, Number::Workers, "CPU workers", "1–8 layouts evaluated in parallel", "cores"), line(),
-                numeric(d, Number::Population, "Population size", "Candidates kept in each generation", "layouts"), line(),
-                numeric(d, Number::Mutation, "Mutation rate", "Chance of an order or rotation change", "%"), line(),
-                toggle("Search until stopped", "Keep improving the best layout", d.settings.continuous, Action::Continuous, Help::Budget),
+                numeric(l, d, Number::Workers, "CPU workers", "1–8 layouts evaluated in parallel", "cores"), line(),
+                numeric(l, d, Number::Population, "Population size", "Candidates kept in each generation", "layouts"), line(),
+                numeric(l, d, Number::Mutation, "Mutation rate", "Chance of an order or rotation change", "%"), line(),
+                toggle(l, "Search until stopped", "Keep improving the best layout", d.settings.continuous, Action::Continuous, Help::Budget),
             ];
-            if d.settings.continuous { fields } else { fields.push(numeric(d, Number::Attempts, "Evaluation budget", "Stop after this many candidate layouts", "tries")) }
+            if d.settings.continuous { fields } else { fields.push(numeric(l, d, Number::Attempts, "Evaluation budget", "Stop after this many candidate layouts", "tries")) }
         }
     };
     let (title, explanation, tip) = help_copy(d.help);
     let guide = container(widgets::scroll_region(
         "settings-guide",
         column![
-            text("HOW IT WORKS").size(CAPTION).font(MONO).color(SUBTLE),
-            canvas(Example(d)).width(Fill).height(182),
-            text(title).size(HEADING).font(BOLD),
-            text(explanation).size(BODY).color(FOREGROUND),
-            text(tip).size(SMALL).color(MUTED_FOREGROUND),
+            text(l.tr("HOW IT WORKS"))
+                .size(CAPTION)
+                .font(MONO)
+                .color(SUBTLE),
+            canvas(Example(d, l)).width(Fill).height(182),
+            text(l.tr(title)).size(HEADING).font(BOLD),
+            text(l.tr(explanation)).size(BODY).color(FOREGROUND),
+            text(l.tr(tip)).size(SMALL).color(MUTED_FOREGROUND),
         ]
         .spacing(gap::MD),
     ))
@@ -180,8 +188,8 @@ pub fn dialog(d: &Dialog, window: Size) -> Element<'_, Message> {
         column![
             row![
                 column![
-                    text("Project settings").size(TITLE).font(BOLD),
-                    text("Fine control, with a clear view of what each choice changes.")
+                    text(l.tr("Project settings")).size(TITLE).font(BOLD),
+                    text(l.tr("Fine control, with a clear view of what each choice changes."))
                         .size(BODY)
                         .color(MUTED_FOREGROUND)
                 ]
@@ -197,8 +205,12 @@ pub fn dialog(d: &Dialog, window: Size) -> Element<'_, Message> {
             line(),
             body,
             line(),
-            text(d.error.as_deref().unwrap_or(
-                "Settings are saved with this project. Apply changes when you’re ready."
+            text(d.error.as_ref().map_or_else(
+                || {
+                    l.tr("Settings are saved with this project. Apply changes when you’re ready.")
+                        .to_owned()
+                },
+                |error| error.render(l),
             ))
             .size(SMALL)
             .color(if d.error.is_some() {
@@ -207,16 +219,16 @@ pub fn dialog(d: &Dialog, window: Size) -> Element<'_, Message> {
                 MUTED_FOREGROUND
             }),
             row![
-                button(text("Restore defaults").size(BODY))
+                button(text(l.tr("Restore defaults")).size(BODY))
                     .padding([9, 12])
                     .on_press(message(Action::Reset))
                     .style(style::button_style(Button::Ghost)),
                 space::horizontal(),
-                button(text("Cancel").size(BODY))
+                button(text(l.tr("Cancel")).size(BODY))
                     .padding([9, 18])
                     .on_press(message(Action::Close))
                     .style(style::button_style(Button::Outline)),
-                button(text("Apply settings").size(BODY).font(BOLD))
+                button(text(l.tr("Apply settings")).size(BODY).font(BOLD))
                     .padding([9, 18])
                     .on_press(message(Action::Apply))
                     .style(style::button_style(Button::Primary))
@@ -257,7 +269,7 @@ fn help_copy(help: Help) -> (&'static str, &'static str, &'static str) {
     }
 }
 
-struct Example<'a>(&'a Dialog);
+struct Example<'a>(&'a Dialog, Language);
 impl canvas::Program<Message> for Example<'_> {
     type State = ();
     fn draw(
@@ -271,6 +283,7 @@ impl canvas::Program<Message> for Example<'_> {
         let mut f = Frame::new(renderer, bounds.size());
         f.scale(bounds.width / 252.);
         let d = self.0;
+        let l = self.1;
         let value =
             |n: Number, default: f64| d.inputs[n as usize].parse::<f64>().unwrap_or(default);
         let text = |f: &mut Frame, s: String, x, y| {
@@ -313,12 +326,13 @@ impl canvas::Program<Message> for Example<'_> {
                 text(
                     &mut f,
                     if merging {
-                        "2 parts / 1 shared cut".into()
+                        l.tr("2 parts / 1 shared cut").into()
                     } else {
-                        format!(
-                            "{} {} between outlines",
-                            d.inputs[0],
-                            d.settings.units.symbol()
+                        trf!(
+                            l,
+                            "{gap} {unit} between outlines",
+                            gap = d.inputs[0],
+                            unit = d.settings.units.symbol()
                         )
                     },
                     20.,
@@ -355,7 +369,12 @@ impl canvas::Program<Message> for Example<'_> {
                 }
                 text(
                     &mut f,
-                    format!("{count} orientations / {:.1}° steps", 360. / count as f64),
+                    trf!(
+                        l,
+                        "{count} orientations / {angle}° steps",
+                        count = count,
+                        angle = format!("{:.1}", 360. / count as f64)
+                    ),
                     12.,
                     151.,
                 );
@@ -379,7 +398,7 @@ impl canvas::Program<Message> for Example<'_> {
                             PARTS[j % PARTS.len()],
                         );
                     }
-                    text(&mut f, title.into(), x + 2., 145.);
+                    text(&mut f, l.tr(title).into(), x + 2., 145.);
                 }
             }
             Help::Curves => {
@@ -410,8 +429,8 @@ impl canvas::Program<Message> for Example<'_> {
                     });
                     f.stroke(&p, Stroke::default().with_color(PRIMARY).with_width(1.5));
                 }
-                text(&mut f, "Faster".into(), 20., 142.);
-                text(&mut f, "More precise".into(), 136., 142.);
+                text(&mut f, l.tr("Faster").into(), 20., 142.);
+                text(&mut f, l.tr("More precise").into(), 136., 142.);
             }
             Help::Endpoints => {
                 line(&mut f, (22., 55.), (111., 87.), PRIMARY);
@@ -423,7 +442,7 @@ impl canvas::Program<Message> for Example<'_> {
                     &Path::circle(Point::new(118., 89.), 28.),
                     Stroke::default().with_color(SUBTLE),
                 );
-                text(&mut f, "Repair only small gaps".into(), 35., 143.);
+                text(&mut f, l.tr("Repair only small gaps").into(), 35., 143.);
             }
             Help::Simplify => {
                 let hull = Path::new(|p| {
@@ -453,7 +472,7 @@ impl canvas::Program<Message> for Example<'_> {
                     &outline,
                     Stroke::default().with_color(FOREGROUND).with_width(2.),
                 );
-                text(&mut f, "Envelope / original cut".into(), 25., 145.);
+                text(&mut f, l.tr("Envelope / original cut").into(), 25., 145.);
             }
             Help::Workers => {
                 let count = value(Number::Workers, 2.).clamp(1., 8.) as usize;
@@ -467,7 +486,12 @@ impl canvas::Program<Message> for Example<'_> {
                         if i < count { ACCENT } else { MUTED },
                     );
                 }
-                text(&mut f, format!("{count} layouts at a time"), 34., 145.);
+                text(
+                    &mut f,
+                    trf!(l, "{count} layouts at a time", count = count),
+                    34.,
+                    145.,
+                );
             }
             Help::Population | Help::Mutation => {
                 for i in 0..12 {
@@ -492,12 +516,13 @@ impl canvas::Program<Message> for Example<'_> {
                 text(
                     &mut f,
                     if d.help == Help::Mutation {
-                        format!(
-                            "{}% chance of a change",
-                            d.inputs[Number::Mutation as usize]
+                        trf!(
+                            l,
+                            "{percent}% chance of a change",
+                            percent = d.inputs[Number::Mutation as usize]
                         )
                     } else {
-                        "Different layouts / one best".into()
+                        l.tr("Different layouts / one best").into()
                     },
                     5.,
                     145.,
@@ -517,16 +542,25 @@ impl canvas::Program<Message> for Example<'_> {
                 for pair in points.windows(2) {
                     line(&mut f, pair[0], pair[1], PRIMARY);
                 }
-                text(&mut f, "Keep the best. Stop anytime.".into(), 5., 146.);
+                text(
+                    &mut f,
+                    l.tr("Keep the best. Stop anytime.").into(),
+                    5.,
+                    146.,
+                );
             }
             Help::Units | Help::Svg | Help::DxfImport | Help::DxfExport => {
                 rect(&mut f, 67., 24., 112., 100., SHEET);
                 rect(&mut f, 84., 41., 78., 66., PARTS[1]);
                 line(&mut f, (67., 137.), (179., 137.), PRIMARY);
                 let caption = match d.help {
-                    Help::Units => "25.4 mm = 1 inch".into(),
-                    Help::Svg => format!("{} units = 1 inch", d.inputs[Number::Svg as usize]),
-                    _ => "Same size / different units".into(),
+                    Help::Units => l.tr("25.4 mm = 1 inch").into(),
+                    Help::Svg => trf!(
+                        l,
+                        "{count} units = 1 inch",
+                        count = d.inputs[Number::Svg as usize]
+                    ),
+                    _ => l.tr("Same size / different units").into(),
                 };
                 text(&mut f, caption, 22., 152.);
             }
